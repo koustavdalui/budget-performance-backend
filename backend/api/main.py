@@ -43,7 +43,6 @@ async def require_pilot_token(request: Request, call_next):
 @app.on_event('startup')
 def on_startup():
     init_db()
-    print(f'PILOT_ACCESS_TOKEN is {"SET (length "+str(len(PILOT_ACCESS_TOKEN))+")" if PILOT_ACCESS_TOKEN else "NOT SET"}')
 
 
 def _rollup_lines(lines, rollup):
