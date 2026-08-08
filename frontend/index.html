@@ -1474,6 +1474,18 @@ function renderAll(){
 // opened locally with the Docker backend running - the published claude.ai
 // artifact link has no way to reach localhost, by design (see backend/README.md).
 const API_BASE = 'https://budget-performance-api.onrender.com';
+// Set only on the temporary Render pilot build (never in local dev, never in
+// the published claude.ai artifact) - sent as a header on every request so the
+// backend's PILOT_ACCESS_TOKEN check (see backend/api/main.py) accepts it. Not
+// real per-user auth, just a shared secret matching the pilot's proportionate,
+// short-lived UAT scope - keeps the raw API URL from being publicly callable
+// by anyone who never went through the pilot frontend.
+const API_TOKEN = 'xHVynWhH08Lfa-IyZgpv1hmfB_n82cJb';
+function apiFetch(path, opts={}){
+  const headers = {...(opts.headers||{})};
+  if (API_TOKEN) headers['X-Pilot-Token'] = API_TOKEN;
+  return fetch(API_BASE+path, {...opts, headers});
+}
 // budgetYear is the Data Entry tab's own "which year am I looking at" concept
 // for Team Budgets - deliberately separate from the Dashboard's state.year,
 // since the Data Entry tab never follows the Dashboard's Year selector.
@@ -1515,7 +1527,7 @@ function sumCampaignsRaw(campaigns, metric){
 
 async function checkBackendReachable(){
   try{
-    const res = await fetch(API_BASE+'/api/health');
+    const res = await apiFetch('/api/health');
     entryState.reachable = res.ok;
   } catch(e){
     entryState.reachable = false;
@@ -1533,9 +1545,9 @@ async function checkBackendReachable(){
 async function loadTaxonomy(){
   try{
     const [teamsRes, subteamsRes, budgetsRes] = await Promise.all([
-      fetch(API_BASE+'/api/teams'),
-      fetch(API_BASE+'/api/subteams'),
-      fetch(API_BASE+'/api/budgets'),
+      apiFetch('/api/teams'),
+      apiFetch('/api/subteams'),
+      apiFetch('/api/budgets'),
     ]);
     entryState.teams = await teamsRes.json();
     entryState.budgets = await budgetsRes.json();
@@ -1560,7 +1572,7 @@ function subTeamsForTeam(team){
 async function addTeam(name){
   name = (name||'').trim();
   if (!name) return;
-  await fetch(API_BASE+'/api/teams', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({team:name})});
+  await apiFetch('/api/teams', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({team:name})});
   await loadTaxonomy();
   renderTeamsSubteamsCard();
   renderBudgetRows();
@@ -1570,7 +1582,7 @@ async function addTeam(name){
 async function addSubteam(team, name){
   name = (name||'').trim();
   if (!name) return;
-  await fetch(API_BASE+'/api/subteams', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({team, subTeam:name})});
+  await apiFetch('/api/subteams', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({team, subTeam:name})});
   await loadTaxonomy();
   renderTeamsSubteamsCard();
   renderAll();
@@ -1579,7 +1591,7 @@ async function addSubteam(team, name){
 async function deleteTeamConfirm(team){
   if (!confirm(`Delete team "${team}"? This cannot be undone.`)) return;
   try{
-    const res = await fetch(`${API_BASE}/api/teams/${encodeURIComponent(team)}`, {method:'DELETE'});
+    const res = await apiFetch(`/api/teams/${encodeURIComponent(team)}`, {method:'DELETE'});
     if (!res.ok){ const err = await res.json().catch(()=>({})); throw new Error(err.detail || ('Server returned '+res.status)); }
     await loadTaxonomy();
     renderTeamsSubteamsCard();
@@ -1591,7 +1603,7 @@ async function deleteTeamConfirm(team){
 async function deleteSubteamConfirm(team, subTeam){
   if (!confirm(`Delete sub team "${subTeam}" under ${team}?`)) return;
   try{
-    const res = await fetch(`${API_BASE}/api/subteams/${encodeURIComponent(team)}/${encodeURIComponent(subTeam)}`, {method:'DELETE'});
+    const res = await apiFetch(`/api/subteams/${encodeURIComponent(team)}/${encodeURIComponent(subTeam)}`, {method:'DELETE'});
     if (!res.ok){ const err = await res.json().catch(()=>({})); throw new Error(err.detail || ('Server returned '+res.status)); }
     await loadTaxonomy();
     renderTeamsSubteamsCard();
@@ -1690,7 +1702,7 @@ function renderEntryReachability(){
 // ---------- Team Budgets ----------
 async function loadBudgets(){
   try{
-    const res = await fetch(API_BASE+'/api/budgets');
+    const res = await apiFetch('/api/budgets');
     entryState.budgets = await res.json();
   } catch(e){ entryState.budgets = []; }
   renderBudgetRows();
@@ -1764,7 +1776,7 @@ function openBudgetModal(prefillTeam){
     const team = teamSel.value, year = +yearInp.value;
     const amount = amtInp.value==='' ? null : parseFloat(amtInp.value);
     try{
-      await fetch(`${API_BASE}/api/budgets/${encodeURIComponent(team)}/${year}`, {
+      await apiFetch(`/api/budgets/${encodeURIComponent(team)}/${year}`, {
         method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({team, year, amount}),
       });
       await loadBudgets();
@@ -1778,8 +1790,8 @@ async function refreshCampaignsFromBackend(rerenderDashboard){
   if (rerenderDashboard===undefined) rerenderDashboard = true;
   try{
     const [flatRes, exportRes] = await Promise.all([
-      fetch(API_BASE+'/api/campaigns'),
-      fetch(API_BASE+'/api/campaigns/export'),
+      apiFetch('/api/campaigns'),
+      apiFetch('/api/campaigns/export'),
     ]);
     ENTRY_CAMPAIGNS = await flatRes.json();
     setAllCampaigns(await exportRes.json());
@@ -1872,7 +1884,7 @@ function renderEntryTree(){
     btn.onclick = async (e)=>{
       e.stopPropagation();
       if (!confirm('Delete this campaign? This cannot be undone.')) return;
-      await fetch(`${API_BASE}/api/campaigns/${btn.dataset.id}`, {method:'DELETE'});
+      await apiFetch(`/api/campaigns/${btn.dataset.id}`, {method:'DELETE'});
       await refreshCampaignsFromBackend();
     };
   });
@@ -2318,9 +2330,9 @@ function previewCampaignFromForm(existingId){
 
 async function saveCampaignFromForm(existingId, data){
   try{
-    const url = existingId ? `${API_BASE}/api/campaigns/${existingId}` : `${API_BASE}/api/campaigns`;
+    const path = existingId ? `/api/campaigns/${existingId}` : `/api/campaigns`;
     const method = existingId ? 'PUT' : 'POST';
-    const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+    const res = await apiFetch(path, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
     if (!res.ok) throw new Error('Server returned '+res.status);
     closeModal();
     await refreshCampaignsFromBackend();
@@ -2332,7 +2344,7 @@ async function saveCampaignFromForm(existingId, data){
 async function deleteCampaignFromModal(id){
   if (!confirm('Delete this campaign? This cannot be undone.')) return;
   try{
-    await fetch(`${API_BASE}/api/campaigns/${id}`, {method:'DELETE'});
+    await apiFetch(`/api/campaigns/${id}`, {method:'DELETE'});
     closeModal();
     await refreshCampaignsFromBackend();
   } catch(e){
@@ -2660,16 +2672,16 @@ async function confirmImport(){
     const cRow = g.campaignRow;
     const existing = ENTRY_CAMPAIGNS.find(c=> c.campaign.toLowerCase()===cRow.Campaign.toLowerCase() && c.team===cRow.Team);
     if (g.action==='delete'){
-      if (existing){ await fetch(`${API_BASE}/api/campaigns/${existing.id}`, {method:'DELETE'}); deleted++; }
+      if (existing){ await apiFetch(`/api/campaigns/${existing.id}`, {method:'DELETE'}); deleted++; }
       else notFound++;
       continue;
     }
     const payload = importGroupToPayload(g, existing);
     if (existing){
-      await fetch(`${API_BASE}/api/campaigns/${existing.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      await apiFetch(`/api/campaigns/${existing.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       updated++;
     } else {
-      await fetch(`${API_BASE}/api/campaigns`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      await apiFetch(`/api/campaigns`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       created++;
     }
   }
