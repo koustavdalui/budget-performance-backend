@@ -1,7 +1,9 @@
+import os
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 
 from db import get_db, init_db
@@ -20,6 +22,22 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+# Pilot-only access gate: unset locally/in normal dev (docker-compose never sets
+# this), so local usage is completely unaffected. Set only on the temporary
+# Render pilot deployment, to stop the raw API URL from being publicly callable
+# by anyone who isn't going through the pilot frontend (which sends this same
+# token on every request). Not real per-user auth - a single shared secret,
+# proportionate to a short internal UAT trial, not a production auth scheme.
+PILOT_ACCESS_TOKEN = os.environ.get('PILOT_ACCESS_TOKEN')
+
+
+@app.middleware('http')
+async def require_pilot_token(request: Request, call_next):
+    if PILOT_ACCESS_TOKEN and request.method != 'OPTIONS' and request.url.path != '/api/health':
+        if request.headers.get('x-pilot-token') != PILOT_ACCESS_TOKEN:
+            return JSONResponse(status_code=403, content={'detail': 'Forbidden'})
+    return await call_next(request)
 
 
 @app.on_event('startup')
