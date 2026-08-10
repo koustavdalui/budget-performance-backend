@@ -48,9 +48,6 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:syste
 /* ---- dashboard layout: filters sidebar (left) + KPIs/charts (right) ---- */
 .dash-layout{display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start;}
 .filters-sidebar{position:sticky;top:16px;}
-.dashboard-budgets-card{margin-top:14px;}
-.dashboard-budgets-card h3{margin:0 0 4px;font-size:14px;}
-.dashboard-budgets-card .sub{margin-bottom:10px;}
 @media (max-width:900px){ .dash-layout{grid-template-columns:1fr;} .filters-sidebar{position:static;} }
 
 .filters{display:flex;flex-direction:column;gap:12px;padding:14px;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;}
@@ -161,6 +158,11 @@ tbody tr:hover{background:var(--page);}
 
 .search-input{font-family:inherit;font-size:13px;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);width:240px;}
 .search-card{position:relative;margin-bottom:14px;}
+.dashboard-top-row{display:flex;gap:14px;margin-bottom:14px;align-items:flex-start;}
+.dashboard-top-row .search-card{flex:0 0 300px;margin-bottom:0;}
+.budget-kpi-row{display:flex;gap:12px;flex:1;flex-wrap:wrap;}
+.budget-kpi-row .stat-tile{flex:1 1 150px;}
+@media (max-width:900px){ .dashboard-top-row{flex-wrap:wrap;} .dashboard-top-row .search-card{flex:1 1 100%;} }
 .campaign-search-input{width:100%;padding:11px 14px;font-size:14px;}
 .search-results{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;margin-top:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:340px;overflow-y:auto;z-index:30;display:none;}
 .search-results.open{display:block;}
@@ -274,15 +276,17 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
   </div>
 
   <div id="panel-dashboard" class="tab-panel active">
-    <div class="search-card" id="campaignSearchWrap">
-      <input class="search-input campaign-search-input" id="campaignSearch" placeholder="Search for a campaign&hellip;" autocomplete="off">
-      <div class="search-results" id="campaignSearchResults"></div>
+    <div class="dashboard-top-row">
+      <div class="search-card" id="campaignSearchWrap">
+        <input class="search-input campaign-search-input" id="campaignSearch" placeholder="Search for a campaign&hellip;" autocomplete="off">
+        <div class="search-results" id="campaignSearchResults"></div>
+      </div>
+      <div class="budget-kpi-row" id="dashboardBudgetsRow"></div>
     </div>
 
     <div class="dash-layout">
       <aside class="filters-sidebar">
         <div class="filters" id="filters"></div>
-        <div class="card dashboard-budgets-card" id="dashboardBudgetsCard"></div>
       </aside>
 
       <div class="dash-main">
@@ -1474,27 +1478,26 @@ function renderAll(){
   renderTopCampaigns(campaigns, months);
 }
 
-// Sits in the filters sidebar, below the filter list - that column has empty
-// space below the filters on most screens, so this adds visibility into
-// per-team budgets without pushing any of the main dashboard content down.
+// One stat-tile per team's budget, same treatment as the Plan/Forecast/Commit
+// KPI row - sits up top next to the (now narrower) search box so it's visible
+// without scrolling, instead of buried in the sidebar below the filters.
 // Mostly blank today (only Field Marketing has a real 2026 budget set) but
 // the structure is meant to be here so it's already in place once more teams
 // set theirs via the Data Entry tab.
 function renderDashboardBudgets(){
-  const el = document.getElementById('dashboardBudgetsCard');
+  const el = document.getElementById('dashboardBudgetsRow');
   if (!el) return;
   const teams = dashboardTeams();
   const year = state.year;
-  const rows = teams.map(team=>{
+  el.innerHTML = teams.map(team=>{
     const b = (entryState.budgets||[]).find(x=>x.team===team && x.year===year);
     const amount = (b && b.amount!==null && b.amount!==undefined) ? fmtMoney(b.amount, false) : '—';
-    return `<div class="budget-list-row"><span>${escapeHtml(team)}</span><span>${amount}</span></div>`;
-  }).join('') || '<div class="empty-note">No teams yet.</div>';
-  el.innerHTML = `
-    <h3>Team Budgets</h3>
-    <div class="sub">${year} &middot; set via Data Entry</div>
-    ${rows}
-  `;
+    return `<div class="stat-tile">
+      <div class="label">${escapeHtml(team)} Budget</div>
+      <div class="value">${amount}</div>
+      <div class="delta neutral">${year} &middot; set via Data Entry</div>
+    </div>`;
+  }).join('') || '';
 }
 
 // ==================== Data Entry tab ====================
