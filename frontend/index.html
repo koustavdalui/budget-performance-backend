@@ -1101,22 +1101,25 @@ function renderTrend(campaigns){
   document.getElementById('trendSub').textContent = `${granularity} spend, ${periodRangeLabel()} (selected filters)`;
 
   const buckets = trendBuckets();
+  const seriesList = isQuarterly ? [BUDGET_SERIES, ...TREND_SERIES] : TREND_SERIES;
   const mainTeams = state.team==='All' ? dashboardTeams() : [state.team];
-  const targetData = budgetBucketRow(buckets, mainTeams, isQuarterly);
-  const data = trendBucketData(campaigns, buckets);
-  renderGroupedBarChart('trendChart', buckets, data, {targetData});
+  const mainBudgetRow = budgetBucketRow(buckets, mainTeams, isQuarterly);
+  const data = mainBudgetRow ? [mainBudgetRow, ...trendBucketData(campaigns, buckets)] : trendBucketData(campaigns, buckets);
+  renderGroupedBarChart('trendChart', buckets, data, {seriesList});
 
   const teamsCard = document.getElementById('trendTeamsCard');
   if (state.team==='All'){
     teamsCard.style.display = '';
     const teams = dashboardTeams();
-    const perTeamData = teams.map(t=> trendBucketData(campaigns.filter(c=>c.team===t), buckets));
-    const perTeamTargets = teams.map(t=> budgetBucketRow(buckets, [t], isQuarterly));
-    const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null),
-      ...perTeamTargets.flatMap(r=>r||[]).filter(v=>v!==null));
+    const perTeamData = teams.map(t=>{
+      const base = trendBucketData(campaigns.filter(c=>c.team===t), buckets);
+      const budgetRow = budgetBucketRow(buckets, [t], isQuarterly);
+      return budgetRow ? [budgetRow, ...base] : base;
+    });
+    const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null));
     document.getElementById('trendTeamsPanel').innerHTML =
       teams.map((t,i)=>`<div class="trend-split-panel"><h4>${escapeHtml(t)}</h4><div id="trendChartTeam${i}"></div></div>`).join('');
-    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, targetData: perTeamTargets[i]}));
+    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, seriesList}));
   } else {
     teamsCard.style.display = 'none';
   }
@@ -1131,21 +1134,24 @@ function openAllTeamsModal(){
   const months = selectedMonths();
   const isQuarterly = months.length > 3;
   const buckets = trendBuckets();
+  const seriesList = isQuarterly ? [BUDGET_SERIES, ...TREND_SERIES] : TREND_SERIES;
   const teams = dashboardTeams();
-  const perTeamData = teams.map(t=> trendBucketData(campaigns.filter(c=>c.team===t), buckets));
-  const perTeamTargets = teams.map(t=> budgetBucketRow(buckets, [t], isQuarterly));
-  const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null),
-    ...perTeamTargets.flatMap(r=>r||[]).filter(v=>v!==null));
+  const perTeamData = teams.map(t=>{
+    const base = trendBucketData(campaigns.filter(c=>c.team===t), buckets);
+    const budgetRow = budgetBucketRow(buckets, [t], isQuarterly);
+    return budgetRow ? [budgetRow, ...base] : base;
+  });
+  const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null));
 
   document.getElementById('modalBox').classList.add('wide');
   document.getElementById('modalContent').innerHTML = `
-    <div class="modal-title">All Teams &mdash; Plan vs Forecast vs Commit${isQuarterly?' + Budget target':''}</div>
+    <div class="modal-title">All Teams &mdash; Plan vs Forecast vs Commit${isQuarterly?' + Budget':''}</div>
     <div class="all-teams-grid">
       ${teams.map((t,i)=>`<div class="trend-split-panel"><h4>${escapeHtml(t)}</h4><div id="allTeamsChart${i}"></div></div>`).join('')}
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
-  teams.forEach((t,i)=> renderGroupedBarChart('allTeamsChart'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, targetData: perTeamTargets[i]}));
+  teams.forEach((t,i)=> renderGroupedBarChart('allTeamsChart'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, seriesList}));
 }
 
 // ---------- detail modal ----------
