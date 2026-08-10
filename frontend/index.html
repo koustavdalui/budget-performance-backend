@@ -36,7 +36,7 @@
 }
 *{box-sizing:border-box;}
 body{margin:0;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
-.app{max-width:1320px;margin:0 auto;padding:20px 24px 60px;}
+.app{max-width:1800px;margin:0 auto;padding:20px 24px 60px;}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:12px;}
 .title{font-size:20px;font-weight:650;}
 .tabs{display:flex;gap:6px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:4px;}
@@ -48,6 +48,9 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:syste
 /* ---- dashboard layout: filters sidebar (left) + KPIs/charts (right) ---- */
 .dash-layout{display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start;}
 .filters-sidebar{position:sticky;top:16px;}
+.dashboard-budgets-card{margin-top:14px;}
+.dashboard-budgets-card h3{margin:0 0 4px;font-size:14px;}
+.dashboard-budgets-card .sub{margin-bottom:10px;}
 @media (max-width:900px){ .dash-layout{grid-template-columns:1fr;} .filters-sidebar{position:static;} }
 
 .filters{display:flex;flex-direction:column;gap:12px;padding:14px;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;}
@@ -279,6 +282,7 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
     <div class="dash-layout">
       <aside class="filters-sidebar">
         <div class="filters" id="filters"></div>
+        <div class="card dashboard-budgets-card" id="dashboardBudgetsCard"></div>
       </aside>
 
       <div class="dash-main">
@@ -1458,6 +1462,7 @@ function renderAll(){
   const campaigns = filteredCampaigns();
   const months = selectedMonths();
   renderKPIs(campaigns);
+  renderDashboardBudgets();
   renderTrend(campaigns);
   renderBreakdown('breakdownSubTeam', campaigns, 'subTeam', months, 'commit', 'Sub Team');
   renderBreakdown('breakdownRegion', campaigns, 'region', months, 'commit', 'Region');
@@ -1467,6 +1472,29 @@ function renderAll(){
   renderBreakdown('breakdownCampaignType', campaigns.filter(c=>c.campaignType), 'campaignType', months, 'commit', 'Campaign Type');
   renderBreakdown('breakdownSubCampaignType', campaigns.filter(c=>c.subCampaignType), 'subCampaignType', months, 'commit', 'Sub Campaign Type');
   renderTopCampaigns(campaigns, months);
+}
+
+// Sits in the filters sidebar, below the filter list - that column has empty
+// space below the filters on most screens, so this adds visibility into
+// per-team budgets without pushing any of the main dashboard content down.
+// Mostly blank today (only Field Marketing has a real 2026 budget set) but
+// the structure is meant to be here so it's already in place once more teams
+// set theirs via the Data Entry tab.
+function renderDashboardBudgets(){
+  const el = document.getElementById('dashboardBudgetsCard');
+  if (!el) return;
+  const teams = dashboardTeams();
+  const year = state.year;
+  const rows = teams.map(team=>{
+    const b = (entryState.budgets||[]).find(x=>x.team===team && x.year===year);
+    const amount = (b && b.amount!==null && b.amount!==undefined) ? fmtMoney(b.amount, false) : '—';
+    return `<div class="budget-list-row"><span>${escapeHtml(team)}</span><span>${amount}</span></div>`;
+  }).join('') || '<div class="empty-note">No teams yet.</div>';
+  el.innerHTML = `
+    <h3>Team Budgets</h3>
+    <div class="sub">${year} &middot; set via Data Entry</div>
+    ${rows}
+  `;
 }
 
 // ==================== Data Entry tab ====================
