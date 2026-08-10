@@ -72,7 +72,7 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:syste
 .msel-actions{display:flex;justify-content:space-between;padding:4px 6px 6px;border-bottom:1px solid var(--grid);margin-bottom:4px;}
 .msel-actions button{background:none;border:none;color:var(--series-1);cursor:pointer;font-size:11px;font-weight:600;padding:2px 4px;font-family:inherit;}
 
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px;}
 .stat-tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
 .stat-tile .label{font-size:12px;color:var(--text-muted);font-weight:600;}
 .stat-tile .value{font-size:26px;font-weight:650;margin-top:6px;}
@@ -85,6 +85,10 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:syste
 .entry-cards-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
 @media (max-width:900px){ .entry-cards-row{grid-template-columns:1fr;} }
 .trend-teams-card{max-height:340px;overflow-y:auto;}
+.trend-teams-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.trend-teams-header .reset-btn{white-space:nowrap;}
+.all-teams-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
+@media (max-width:700px){ .all-teams-grid{grid-template-columns:1fr;} }
 .trend-split{display:grid;grid-template-columns:1fr;gap:18px;}
 .trend-split-panel h4{font-size:13px;font-weight:650;margin:0 0 6px;color:var(--text-secondary);}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
@@ -156,13 +160,22 @@ tbody tr:hover{background:var(--page);}
 .bar-fill{height:100%;border-radius:4px;background:var(--series-1);}
 .bar-row .val{text-align:right;color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums;}
 
+/* Part-to-whole breakdowns (few categories): one segmented bar + a direct-labeled
+   legend, instead of a pie - see dataviz skill's choosing-a-form guidance
+   (part-to-whole -> stacked bar, pie discouraged). */
+.stacked-bar{display:flex;height:26px;border-radius:6px;overflow:hidden;background:var(--page);}
+.stacked-seg{height:100%;}
+.stacked-seg+.stacked-seg{border-left:2px solid var(--card);}
+.stacked-legend{display:flex;flex-direction:column;gap:7px;margin-top:12px;}
+.legend-row{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+.legend-row.clickable{cursor:pointer;}
+.legend-row .swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.legend-row .lbl{flex:1;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.legend-row.clickable:hover .lbl{color:var(--series-1);}
+.legend-row .val{text-align:right;color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+
 .search-input{font-family:inherit;font-size:13px;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);width:240px;}
 .search-card{position:relative;margin-bottom:14px;}
-.dashboard-top-row{display:flex;gap:14px;margin-bottom:14px;align-items:flex-start;}
-.dashboard-top-row .search-card{flex:0 0 300px;margin-bottom:0;}
-.budget-kpi-row{display:flex;gap:12px;flex:1;flex-wrap:wrap;}
-.budget-kpi-row .stat-tile{flex:1 1 150px;}
-@media (max-width:900px){ .dashboard-top-row{flex-wrap:wrap;} .dashboard-top-row .search-card{flex:1 1 100%;} }
 .campaign-search-input{width:100%;padding:11px 14px;font-size:14px;}
 .search-results{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;margin-top:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:340px;overflow-y:auto;z-index:30;display:none;}
 .search-results.open{display:block;}
@@ -224,6 +237,8 @@ tr.row-campaign:hover td{background:var(--page);}
 .budget-list-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--grid);font-size:13px;}
 .budget-list-row:last-of-type{border-bottom:none;}
 .budget-list-row .edit-btn{background:none;border:none;color:var(--series-1);cursor:pointer;font-size:12px;font-weight:600;}
+.budget-quarters{display:flex;gap:14px;font-size:12px;color:var(--text-secondary);font-variant-numeric:tabular-nums;}
+.budget-q b{color:var(--text-muted);font-weight:600;margin-right:3px;}
 .primary-btn{background:var(--series-1);color:#fff;border:none;font-size:13px;font-weight:650;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:inherit;}
 .primary-btn:hover{opacity:.9;}
 .primary-btn:disabled{opacity:.5;cursor:not-allowed;}
@@ -276,12 +291,9 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
   </div>
 
   <div id="panel-dashboard" class="tab-panel active">
-    <div class="dashboard-top-row">
-      <div class="search-card" id="campaignSearchWrap">
-        <input class="search-input campaign-search-input" id="campaignSearch" placeholder="Search for a campaign&hellip;" autocomplete="off">
-        <div class="search-results" id="campaignSearchResults"></div>
-      </div>
-      <div class="budget-kpi-row" id="dashboardBudgetsRow"></div>
+    <div class="search-card" id="campaignSearchWrap">
+      <input class="search-input campaign-search-input" id="campaignSearch" placeholder="Search for a campaign&hellip;" autocomplete="off">
+      <div class="search-results" id="campaignSearchResults"></div>
     </div>
 
     <div class="dash-layout">
@@ -299,7 +311,10 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
             <div id="trendChart"></div>
           </div>
           <div class="card trend-teams-card" id="trendTeamsCard">
-            <h3>By Team</h3>
+            <div class="trend-teams-header">
+              <h3 style="margin:0;">By Team</h3>
+              <button class="reset-btn" id="expandTeamsBtn" title="View all teams together in a larger window">&#10530; Expand</button>
+            </div>
             <div class="sub">Plan vs Forecast vs Commit, split per team</div>
             <div id="trendTeamsPanel"></div>
           </div>
@@ -395,7 +410,7 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
         </div>
         <div class="tablecard">
           <h3 style="margin:0 0 4px;">Team Budgets</h3>
-          <div class="sub" style="margin-bottom:12px;">Yearly budget allocated by Marketing Ops, set before Plan. Independent of the Dashboard's Year filter.</div>
+          <div class="sub" style="margin-bottom:12px;">Quarterly budget allocated by Marketing Ops, set before Plan. Independent of the Dashboard's Year filter.</div>
           <div class="entry-field" style="max-width:140px;margin-bottom:10px;">
             <label>Viewing year</label>
             <select id="budgetYearSelect"></select>
@@ -544,12 +559,23 @@ function activePresetKey(){
   return null;
 }
 
+// Fixed display order (Growth, Field, Ecosystem, Brand) rather than
+// alphabetical - any team not in this list (a newly-registered one) falls
+// back to alphabetical, appended after the known ones.
+const TEAM_ORDER = ['Growth Marketing', 'Field Marketing', 'Ecosystem Marketing', 'Product and Brand Marketing'];
+function teamSortCompare(a, b){
+  const ia = TEAM_ORDER.indexOf(a), ib = TEAM_ORDER.indexOf(b);
+  if (ia!==-1 && ib!==-1) return ia-ib;
+  if (ia!==-1) return -1;
+  if (ib!==-1) return 1;
+  return a.localeCompare(b);
+}
 // All teams to show on the Dashboard: the registry (entryState.teams - teams
 // that exist via Team Budgets, even with zero campaigns) unioned with whatever
 // teams already appear on campaigns (covers data seeded before the registry
 // existed, and the case where the backend is unreachable so the registry is empty).
 function dashboardTeams(){
-  return [...new Set([...uniqueVals('team', 'All'), ...entryState.teams])].sort();
+  return [...new Set([...uniqueVals('team', 'All'), ...entryState.teams])].sort(teamSortCompare);
 }
 
 // Same idea for sub teams, scoped to a team ('All' unions every team's sub teams).
@@ -889,6 +915,31 @@ function positionHandles(){
   fill.style.width = (to-from)+'%';
 }
 
+// ---------- budget (quarterly per team - see backend/api/models.py's TeamBudget) ----------
+// Which quarters the currently-selected period touches - exact for the Q1-Q4/
+// Year presets (activePresetKey()), and for any custom drag-range, any quarter
+// with at least one selected month counts (a loose but sane approximation,
+// since budget itself is only ever set at quarter granularity, never monthly).
+function selectedBudgetQuarters(){
+  const preset = activePresetKey();
+  if (preset === 'Year') return ['Q1','Q2','Q3','Q4'];
+  if (preset) return [preset];
+  const months = selectedMonths();
+  return QUARTERS.filter(q => MONTHS.slice(q.from, q.to+1).some(m=>months.includes(m))).map(q=>q.key);
+}
+// Sums entryState.budgets for the given teams/year/quarters - null (not 0) if
+// none of those rows have a real amount set yet, so the KPI tile can show "—"
+// instead of a misleading $0.
+function totalBudget(teams, year, quarters){
+  let total = 0, any = false;
+  (entryState.budgets||[]).forEach(b=>{
+    if (teams.includes(b.team) && b.year===year && quarters.includes(b.quarter) && b.amount!=null){
+      total += b.amount; any = true;
+    }
+  });
+  return any ? total : null;
+}
+
 // ---------- KPI row ----------
 function renderKPIs(campaigns){
   const months = selectedMonths();
@@ -898,7 +949,12 @@ function renderKPIs(campaigns){
   const commit = sumMetric(campaigns, months, 'commit');
   const variance = (commit!==null && plan) ? ((commit-plan)/plan*100) : null;
 
+  const budgetTeams = state.team==='All' ? dashboardTeams() : [state.team];
+  const budgetQuarters = selectedBudgetQuarters();
+  const budget = totalBudget(budgetTeams, state.year, budgetQuarters);
+
   const tiles = [
+    {label:`Total Budget (${rangeLabel})`, value: fmtMoney(budget), note: budgetQuarters.join('+')+' '+state.year+' &middot; set via Data Entry'},
     {label:`Total Plan (${rangeLabel})`, value: fmtMoney(plan), note: campaigns.length+' campaigns'},
     {label:`Total Forecast (${rangeLabel})`, value: fmtMoney(forecast), note: 'blank months excluded from total'},
     {label:`Total Commit (${rangeLabel})`, value: fmtMoney(commit), note: 'actual / committed spend'},
@@ -919,6 +975,10 @@ const TREND_SERIES = [
   {key:'forecast', name:'Forecast', color:'var(--series-2)'},
   {key:'commit', name:'Commit', color:'var(--series-3)'},
 ];
+// Shown only at quarterly granularity (Year view, or a single Q1-Q4 preset) -
+// budget is only ever set per quarter, never per month, so a monthly bucket
+// view has no meaningful Budget bar to draw.
+const BUDGET_SERIES = {key:'budget', name:'Budget', color:'var(--series-4)'};
 
 // Buckets the selected range for the trend chart: by month when the range is
 // a quarter or less (≤3 months), by quarter otherwise - so Year view groups
@@ -936,14 +996,27 @@ function trendBucketData(campaigns, buckets){
   return TREND_SERIES.map(s=>buckets.map(b=>sumMetric(campaigns, b.months, s.key)));
 }
 
-// Grouped bar chart: one group of 3 bars (Plan/Forecast/Commit) per bucket.
+// Grouped bar chart: one group of bars per bucket, one bar per entry in
+// opts.seriesList (defaults to Plan/Forecast/Commit - pass a longer list,
+// e.g. [BUDGET_SERIES, ...TREND_SERIES], to add a Budget bar in front).
 // opts.sharedMax lets two side-by-side charts (team-split mode) use the same
 // y-scale so their bar heights stay directly comparable.
+// Budget is drawn as a dashed target-line across each bucket's bar group,
+// not as a 4th bar - it's conceptually a threshold/target to plan against,
+// not a comparable spend figure, and a bar would frequently be invisible
+// next to Plan/Forecast/Commit (a real case hit in testing: Field Marketing's
+// $250/quarter budget rendered at 0.1px tall next to a $92K Plan bar on the
+// same linear scale - technically "there" but not visible). A line's
+// visibility doesn't depend on separating from zero the way a bar's does, so
+// this is correct at any magnitude, not just a min-height hack.
 function renderGroupedBarChart(elId, buckets, data, opts={}){
   const el = document.getElementById(elId);
+  const seriesList = opts.seriesList || TREND_SERIES;
+  const targetData = opts.targetData || null;
   const w=560, h=220, padL=54, padR=16, padT=16, padB=28;
   const allVals = data.flat().filter(v=>v!==null);
-  const maxV = Math.max(1, ...allVals, opts.sharedMax||0);
+  const targetVals = (targetData||[]).filter(v=>v!==null);
+  const maxV = Math.max(1, ...allVals, ...targetVals, opts.sharedMax||0);
   const niceMax = (()=>{ const mag=Math.pow(10,Math.floor(Math.log10(maxV||1))); const step=mag/2||1; return Math.ceil(maxV/step)*step; })();
   const y = v => padT + (1 - v/niceMax)*(h-padT-padB);
   const baseline = y(0);
@@ -951,8 +1024,8 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
   const n = buckets.length;
   const bandW = (w-padL-padR)/n;
   const barGap = 2, maxBarW = 26;
-  const barW = Math.min(maxBarW, (bandW - barGap*2)*0.28);
-  const groupWidth = barW*3 + barGap*2;
+  const barW = Math.min(maxBarW, (bandW - barGap*(seriesList.length-1))*(0.28*3/seriesList.length));
+  const groupWidth = barW*seriesList.length + barGap*(seriesList.length-1);
 
   let gridLines='', ticks='';
   const steps=4;
@@ -968,10 +1041,10 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
     xticks += `<text x="${cx}" y="${h-padB+16}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${b.label}</text>`;
   });
 
-  let bars='';
+  let bars='', targets='';
   buckets.forEach((b,bi)=>{
     const groupX = padL + bi*bandW + (bandW-groupWidth)/2;
-    TREND_SERIES.forEach((s,si)=>{
+    seriesList.forEach((s,si)=>{
       const v = data[si][bi];
       if (v===null || v===undefined) return;
       const bx = groupX + si*(barW+barGap);
@@ -979,18 +1052,22 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
       const bh = Math.max(0, baseline-by);
       bars += `<rect class="bar" data-si="${si}" data-bi="${bi}" x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="${s.color}" style="cursor:pointer"/>`;
     });
+    if (targetData && targetData[bi]!=null){
+      const ty = y(targetData[bi]);
+      targets += `<line class="budget-target" data-bi="${bi}" x1="${(groupX-4).toFixed(1)}" y1="${ty.toFixed(1)}" x2="${(groupX+groupWidth+4).toFixed(1)}" y2="${ty.toFixed(1)}" stroke="${BUDGET_SERIES.color}" stroke-width="2.5" stroke-dasharray="5,3" style="cursor:pointer"/>`;
+    }
   });
 
   el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" style="overflow:visible;display:block">
-      ${gridLines}${ticks}<line x1="${padL}" y1="${baseline}" x2="${w-padR}" y2="${baseline}" stroke="var(--baseline)" stroke-width="1"/>${xticks}${bars}
+      ${gridLines}${ticks}<line x1="${padL}" y1="${baseline}" x2="${w-padR}" y2="${baseline}" stroke="var(--baseline)" stroke-width="1"/>${xticks}${bars}${targets}
     </svg>
-    <div class="legend">${TREND_SERIES.map(s=>`<span class="lg"><span class="sw" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>`;
+    <div class="legend">${seriesList.map(s=>`<span class="lg"><span class="sw" style="background:${s.color}"></span>${s.name}</span>`).join('')}${targetData?`<span class="lg"><span class="sw-line" style="border-top-color:${BUDGET_SERIES.color};border-top-style:dashed;"></span>${BUDGET_SERIES.name} (target)</span>`:''}</div>`;
 
   const tooltip = document.getElementById('tooltip');
   el.querySelectorAll('.bar').forEach(bar=>{
     bar.addEventListener('mousemove', e=>{
       const si=+bar.dataset.si, bi=+bar.dataset.bi;
-      const s = TREND_SERIES[si];
+      const s = seriesList[si];
       tooltip.innerHTML = `<div class="tt-title">${buckets[bi].label}</div><div class="tt-row">${s.name}<b>${fmtMoney(data[si][bi],false)}</b></div>`;
       tooltip.style.left = (e.pageX+12)+'px';
       tooltip.style.top = (e.pageY-30)+'px';
@@ -998,29 +1075,77 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
     });
     bar.addEventListener('mouseleave', ()=> tooltip.style.opacity = 0);
   });
+  el.querySelectorAll('.budget-target').forEach(line=>{
+    line.addEventListener('mousemove', e=>{
+      const bi = +line.dataset.bi;
+      tooltip.innerHTML = `<div class="tt-title">${buckets[bi].label}</div><div class="tt-row">${BUDGET_SERIES.name}<b>${fmtMoney(targetData[bi],false)}</b></div>`;
+      tooltip.style.left = (e.pageX+12)+'px';
+      tooltip.style.top = (e.pageY-30)+'px';
+      tooltip.style.opacity = 1;
+    });
+    line.addEventListener('mouseleave', ()=> tooltip.style.opacity = 0);
+  });
 }
 
+// Budget only makes sense at quarterly granularity - built here (not inside
+// trendBucketData, which is metric-driven off campaigns) since it comes from
+// entryState.budgets, keyed by team/year/quarter, not from any campaign.
+function budgetBucketRow(buckets, teams, isQuarterly){
+  if (!isQuarterly) return null;
+  return buckets.map(b=> totalBudget(teams, state.year, [b.label]));
+}
 function renderTrend(campaigns){
   const months = selectedMonths();
-  const granularity = months.length<=3 ? 'Monthly' : 'Quarterly';
+  const isQuarterly = months.length > 3;
+  const granularity = isQuarterly ? 'Quarterly' : 'Monthly';
   document.getElementById('trendSub').textContent = `${granularity} spend, ${periodRangeLabel()} (selected filters)`;
 
   const buckets = trendBuckets();
+  const mainTeams = state.team==='All' ? dashboardTeams() : [state.team];
+  const targetData = budgetBucketRow(buckets, mainTeams, isQuarterly);
   const data = trendBucketData(campaigns, buckets);
-  renderGroupedBarChart('trendChart', buckets, data);
+  renderGroupedBarChart('trendChart', buckets, data, {targetData});
 
   const teamsCard = document.getElementById('trendTeamsCard');
   if (state.team==='All'){
     teamsCard.style.display = '';
     const teams = dashboardTeams();
     const perTeamData = teams.map(t=> trendBucketData(campaigns.filter(c=>c.team===t), buckets));
-    const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null));
+    const perTeamTargets = teams.map(t=> budgetBucketRow(buckets, [t], isQuarterly));
+    const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null),
+      ...perTeamTargets.flatMap(r=>r||[]).filter(v=>v!==null));
     document.getElementById('trendTeamsPanel').innerHTML =
       teams.map((t,i)=>`<div class="trend-split-panel"><h4>${escapeHtml(t)}</h4><div id="trendChartTeam${i}"></div></div>`).join('');
-    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax}));
+    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, targetData: perTeamTargets[i]}));
   } else {
     teamsCard.style.display = 'none';
   }
+}
+
+// "Expand" button beside By Team - same per-team data/scale as the sidebar
+// panel, just laid out in a bigger 2-column grid inside the shared modal so
+// every team's chart can be compared side by side without scrolling a tiny
+// column.
+function openAllTeamsModal(){
+  const campaigns = filteredCampaigns();
+  const months = selectedMonths();
+  const isQuarterly = months.length > 3;
+  const buckets = trendBuckets();
+  const teams = dashboardTeams();
+  const perTeamData = teams.map(t=> trendBucketData(campaigns.filter(c=>c.team===t), buckets));
+  const perTeamTargets = teams.map(t=> budgetBucketRow(buckets, [t], isQuarterly));
+  const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null),
+    ...perTeamTargets.flatMap(r=>r||[]).filter(v=>v!==null));
+
+  document.getElementById('modalBox').classList.add('wide');
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-title">All Teams &mdash; Plan vs Forecast vs Commit${isQuarterly?' + Budget target':''}</div>
+    <div class="all-teams-grid">
+      ${teams.map((t,i)=>`<div class="trend-split-panel"><h4>${escapeHtml(t)}</h4><div id="allTeamsChart${i}"></div></div>`).join('')}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  teams.forEach((t,i)=> renderGroupedBarChart('allTeamsChart'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, targetData: perTeamTargets[i]}));
 }
 
 // ---------- detail modal ----------
@@ -1209,6 +1334,74 @@ function renderBreakdown(containerId, campaigns, key, months, metric, dimLabel){
   });
 }
 
+// Deterministic name -> categorical color, so a given category always gets the
+// same swatch regardless of its rank that render (color follows the entity,
+// never its rank) - picks from series-2..series-8, leaving series-1 (orange)
+// free since it already means "primary action" elsewhere on the page.
+function stableSeriesColor(name){
+  let hash = 0;
+  for (let i=0;i<name.length;i++){ hash = (hash*31 + name.charCodeAt(i)) >>> 0; }
+  return `var(--series-${(hash % 7) + 2})`;
+}
+
+// Part-to-whole breakdowns with few categories read better as one segmented
+// bar + a direct-labeled legend than as a ranked list of separate bars (and
+// better than a pie, which the dataviz guidelines here discourage) - used for
+// the dimensions that normally only have a handful of distinct values
+// (Region, Product, Campaign Type, Sub Campaign Type). Dimensions that can
+// have many long-named values (Sub Team, Asset, Tactic) stay as ranked bars,
+// where comparing magnitude across many items matters more than showing the
+// whole-to-part relationship.
+// `groups` is a plain {name: value} map - callers build it however their
+// dimension needs (a simple key groupby, or Product's evenly-split-across-tags
+// logic); `matchFn(name)` returns the campaigns to drill into on click.
+function renderStackedFromGroups(containerId, groups, dimLabel, months, matchFn){
+  let entries = Object.entries(groups).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const el = document.getElementById(containerId);
+  if (!entries.length){ el.innerHTML = '<div class="empty-note">No spend in current filter</div>'; return; }
+  if (entries.length > 7){
+    const head = entries.slice(0,7);
+    const otherTotal = entries.slice(7).reduce((s,[,v])=>s+v,0);
+    entries = [...head, ['Other', otherTotal]];
+  }
+  const total = entries.reduce((s,[,v])=>s+v,0) || 1;
+  const tooltip = document.getElementById('tooltip');
+  const colorFor = k => k==='Other' ? 'var(--text-muted)' : stableSeriesColor(k);
+  const segs = entries.map(([k,v])=>
+    `<div class="stacked-seg" data-k="${escapeHtml(k)}" data-v="${v}" style="width:${(v/total*100).toFixed(2)}%;background:${colorFor(k)}"></div>`
+  ).join('');
+  const legend = entries.map(([k,v])=>
+    `<div class="legend-row${k==='Other'?'':' clickable'}" data-k="${escapeHtml(k)}">
+      <span class="swatch" style="background:${colorFor(k)}"></span>
+      <span class="lbl" title="${k}">${k}</span>
+      <span class="val">${fmtMoney(v)} &middot; ${(v/total*100).toFixed(0)}%</span>
+    </div>`
+  ).join('');
+  el.innerHTML = `<div class="stacked-bar">${segs}</div><div class="stacked-legend">${legend}</div>`;
+  el.querySelectorAll('.stacked-seg').forEach(seg=>{
+    seg.addEventListener('mousemove', e=>{
+      tooltip.innerHTML = `<div class="tt-title">${escapeHtml(seg.dataset.k)}</div><div class="tt-row">${fmtMoney(+seg.dataset.v,false)}</div>`;
+      tooltip.style.left = (e.pageX+12)+'px';
+      tooltip.style.top = (e.pageY-30)+'px';
+      tooltip.style.opacity = 1;
+    });
+    seg.addEventListener('mouseleave', ()=> tooltip.style.opacity = 0);
+  });
+  el.querySelectorAll('.legend-row.clickable').forEach(rowEl=>{
+    const k = rowEl.dataset.k;
+    rowEl.onclick = ()=> openGroupModal(dimLabel, k, matchFn(k), months, null);
+  });
+}
+function renderStackedBreakdown(containerId, campaigns, key, months, metric, dimLabel){
+  const groups = {};
+  campaigns.forEach(c=>{
+    const k = c[key] || 'Unspecified';
+    const v = sumMetric([c], months, metric) || 0;
+    groups[k] = (groups[k]||0) + v;
+  });
+  renderStackedFromGroups(containerId, groups, dimLabel, months, k=> campaigns.filter(c=>(c[key]||'Unspecified')===k));
+}
+
 // ---------- By Asset / By Tactic breakdown: real $ per line, each reading its
 // own independent list (assetLines or tacticLines) - not a shared line set,
 // since asset spend and tactic spend are different expense buckets.
@@ -1263,21 +1456,7 @@ function renderProductBreakdown(campaigns, months, metric){
     const share = total/prods.length;
     prods.forEach(p=>{ groups[p] = (groups[p]||0) + share; });
   });
-  const entries = Object.entries(groups).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-  const max = Math.max(1, ...entries.map(e=>e[1]));
-  const el = document.getElementById('breakdownProduct');
-  if (!entries.length){ el.innerHTML = '<div class="empty-note">No spend in current filter</div>'; return; }
-  el.innerHTML = entries.map(([k,v])=>`
-    <div class="bar-row clickable">
-      <div class="lbl" title="${k}">${k}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(v/max*100).toFixed(1)}%;background:var(--series-5)"></div></div>
-      <div class="val">${fmtMoney(v)}</div>
-    </div>
-  `).join('');
-  el.querySelectorAll('.bar-row').forEach((rowEl,i)=>{
-    const p = entries[i][0];
-    rowEl.onclick = ()=> openGroupModal('Product', p, campaigns.filter(c=>(c.products||[]).includes(p)), months, null);
-  });
+  renderStackedFromGroups('breakdownProduct', groups, 'Product', months, p=> campaigns.filter(c=>(c.products||[]).includes(p)));
 }
 
 // ---------- top campaigns (all matching campaigns, scrollable) ----------
@@ -1466,38 +1645,15 @@ function renderAll(){
   const campaigns = filteredCampaigns();
   const months = selectedMonths();
   renderKPIs(campaigns);
-  renderDashboardBudgets();
   renderTrend(campaigns);
   renderBreakdown('breakdownSubTeam', campaigns, 'subTeam', months, 'commit', 'Sub Team');
-  renderBreakdown('breakdownRegion', campaigns, 'region', months, 'commit', 'Region');
+  renderStackedBreakdown('breakdownRegion', campaigns, 'region', months, 'commit', 'Region');
   renderProductBreakdown(campaigns, months, 'commit');
   renderTacticBreakdown(campaigns, months, 'commit');
   renderAssetBreakdown(campaigns, months, 'commit');
-  renderBreakdown('breakdownCampaignType', campaigns.filter(c=>c.campaignType), 'campaignType', months, 'commit', 'Campaign Type');
-  renderBreakdown('breakdownSubCampaignType', campaigns.filter(c=>c.subCampaignType), 'subCampaignType', months, 'commit', 'Sub Campaign Type');
+  renderStackedBreakdown('breakdownCampaignType', campaigns.filter(c=>c.campaignType), 'campaignType', months, 'commit', 'Campaign Type');
+  renderStackedBreakdown('breakdownSubCampaignType', campaigns.filter(c=>c.subCampaignType), 'subCampaignType', months, 'commit', 'Sub Campaign Type');
   renderTopCampaigns(campaigns, months);
-}
-
-// One stat-tile per team's budget, same treatment as the Plan/Forecast/Commit
-// KPI row - sits up top next to the (now narrower) search box so it's visible
-// without scrolling, instead of buried in the sidebar below the filters.
-// Mostly blank today (only Field Marketing has a real 2026 budget set) but
-// the structure is meant to be here so it's already in place once more teams
-// set theirs via the Data Entry tab.
-function renderDashboardBudgets(){
-  const el = document.getElementById('dashboardBudgetsRow');
-  if (!el) return;
-  const teams = dashboardTeams();
-  const year = state.year;
-  el.innerHTML = teams.map(team=>{
-    const b = (entryState.budgets||[]).find(x=>x.team===team && x.year===year);
-    const amount = (b && b.amount!==null && b.amount!==undefined) ? fmtMoney(b.amount, false) : '—';
-    return `<div class="stat-tile">
-      <div class="label">${escapeHtml(team)} Budget</div>
-      <div class="value">${amount}</div>
-      <div class="delta neutral">${year} &middot; set via Data Entry</div>
-    </div>`;
-  }).join('') || '';
 }
 
 // ==================== Data Entry tab ====================
@@ -1749,6 +1905,8 @@ function entryBudgetYears(){
   return [...set].sort((a,b)=>a-b);
 }
 
+const BUDGET_QUARTERS = ['Q1','Q2','Q3','Q4'];
+
 function renderBudgetRows(){
   const years = entryBudgetYears();
   const yearSel = document.getElementById('budgetYearSelect');
@@ -1757,11 +1915,15 @@ function renderBudgetRows(){
 
   const teams = [...entryState.teams].sort();
   document.getElementById('budgetRows').innerHTML = teams.map(team=>{
-    const b = entryState.budgets.find(x=>x.team===team && x.year===entryState.budgetYear);
-    const amount = (b && b.amount!==null && b.amount!==undefined) ? fmtMoney(b.amount, false) : '—';
+    const quarters = BUDGET_QUARTERS.map(q=>{
+      const b = entryState.budgets.find(x=>x.team===team && x.year===entryState.budgetYear && x.quarter===q);
+      const amount = (b && b.amount!==null && b.amount!==undefined) ? fmtMoney(b.amount, false) : '—';
+      return `<span class="budget-q"><b>${q}</b> ${amount}</span>`;
+    }).join('');
     return `<div class="budget-list-row" data-team="${escapeHtml(team)}">
       <span>${escapeHtml(team)}</span>
-      <span>${amount} <button type="button" class="edit-btn" data-act="edit">Edit</button></span>
+      <span class="budget-quarters">${quarters}</span>
+      <button type="button" class="edit-btn" data-act="edit">Edit</button>
     </div>`;
   }).join('') || '<div class="empty-note">No teams yet.</div>';
 
@@ -1771,6 +1933,9 @@ function renderBudgetRows(){
 }
 
 // ---------- Team Budget modal ("+ Add / edit budget" pops up, fill, save) ----------
+// Budget is quarterly, not yearly - one amount per team per year per Q1-Q4,
+// all four editable together for a given team+year since Marketing Ops sets
+// them as a set, not one quarter at a time.
 function openBudgetModal(prefillTeam){
   document.getElementById('modalBox').classList.remove('wide');
   const teams = [...entryState.teams].sort();
@@ -1781,7 +1946,7 @@ function openBudgetModal(prefillTeam){
         <select id="bm-team">${teams.map(t=>`<option ${t===prefillTeam?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select>
       </div>
       <div class="entry-field"><label>Year</label><input type="number" id="bm-year" value="${entryState.budgetYear}" step="1"></div>
-      <div class="entry-field full"><label>Amount</label><input type="number" id="bm-amount" step="0.01" placeholder="0"></div>
+      ${BUDGET_QUARTERS.map(q=>`<div class="entry-field"><label>${q} Amount</label><input type="number" id="bm-amount-${q}" step="0.01" placeholder="0"></div>`).join('')}
     </div>
     <div class="modal-actions-row">
       <span></span>
@@ -1793,23 +1958,27 @@ function openBudgetModal(prefillTeam){
   `;
   const teamSel = document.getElementById('bm-team');
   const yearInp = document.getElementById('bm-year');
-  const amtInp = document.getElementById('bm-amount');
-  const prefillAmount = ()=>{
-    const b = entryState.budgets.find(x=>x.team===teamSel.value && x.year===+yearInp.value);
-    amtInp.value = (b && b.amount!==null && b.amount!==undefined) ? b.amount : '';
+  const amtInputs = BUDGET_QUARTERS.map(q=>document.getElementById(`bm-amount-${q}`));
+  const prefillAmounts = ()=>{
+    BUDGET_QUARTERS.forEach((q,i)=>{
+      const b = entryState.budgets.find(x=>x.team===teamSel.value && x.year===+yearInp.value && x.quarter===q);
+      amtInputs[i].value = (b && b.amount!==null && b.amount!==undefined) ? b.amount : '';
+    });
   };
-  prefillAmount();
-  teamSel.onchange = prefillAmount;
-  yearInp.onchange = prefillAmount;
+  prefillAmounts();
+  teamSel.onchange = prefillAmounts;
+  yearInp.onchange = prefillAmounts;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('bm-cancel').onclick = closeModal;
   document.getElementById('bm-save').onclick = async ()=>{
     const team = teamSel.value, year = +yearInp.value;
-    const amount = amtInp.value==='' ? null : parseFloat(amtInp.value);
     try{
-      await apiFetch(`/api/budgets/${encodeURIComponent(team)}/${year}`, {
-        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({team, year, amount}),
-      });
+      await Promise.all(BUDGET_QUARTERS.map((q,i)=>{
+        const amount = amtInputs[i].value==='' ? null : parseFloat(amtInputs[i].value);
+        return apiFetch(`/api/budgets/${encodeURIComponent(team)}/${year}/${q}`, {
+          method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({team, year, quarter:q, amount}),
+        });
+      }));
       await loadBudgets();
       closeModal();
     } catch(e){ alert('Could not save budget: '+e.message); }
@@ -2722,6 +2891,7 @@ async function confirmImport(){
   alert(`Import complete: ${created} created, ${updated} updated, ${deleted} deleted${notFound?`, ${notFound} not found (skipped)`:''}.`);
 }
 
+document.getElementById('expandTeamsBtn').onclick = openAllTeamsModal;
 document.getElementById('entryRetryBtn').onclick = checkBackendReachable;
 document.getElementById('entryAddBtn').onclick = ()=> openEntryCampaignModal(null);
 document.getElementById('addTeamBtn').onclick = openTeamModal;
