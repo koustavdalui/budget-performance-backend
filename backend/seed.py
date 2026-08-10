@@ -232,16 +232,26 @@ def main():
     if snapshot_subteams is not None:
         team_subteams |= {(row['team'], row['subTeam']) for row in snapshot_subteams}
 
+    # Budget is quarterly (Q1-Q4 per team per year), not one yearly number.
+    # A pre-migration snapshot may still carry the old shape (one 'amount' for
+    # the whole year, no 'quarter' key) - spread that evenly across all four
+    # quarters rather than dropping it or dumping it all into Q1, so the
+    # migrated total still adds back up to the original yearly figure.
     budget_amounts = {}
     if snapshot_budgets is not None:
         for row in snapshot_budgets:
-            budget_amounts[(row['team'], row['year'])] = row['amount']
+            if row.get('quarter'):
+                budget_amounts[(row['team'], row['year'], row['quarter'])] = row['amount']
+            else:
+                per_quarter = (row['amount'] / 4) if row['amount'] is not None else None
+                for q in ('Q1', 'Q2', 'Q3', 'Q4'):
+                    budget_amounts[(row['team'], row['year'], q)] = per_quarter
     for team_name in teams_seen:
-        budget_amounts.setdefault((team_name, DEFAULT_YEAR), None)  # ensure at least a registration row
+        budget_amounts.setdefault((team_name, DEFAULT_YEAR, 'Q1'), None)  # ensure at least a registration row
 
-    for (team_name, year), amount in budget_amounts.items():
-        if not session.get(TeamBudget, (team_name, year)):
-            session.add(TeamBudget(team=team_name, year=year, amount=amount))
+    for (team_name, year, quarter), amount in budget_amounts.items():
+        if not session.get(TeamBudget, (team_name, year, quarter)):
+            session.add(TeamBudget(team=team_name, year=year, quarter=quarter, amount=amount))
     for team_name, sub_team in team_subteams:
         if not session.get(TeamSubteam, (team_name, sub_team)):
             session.add(TeamSubteam(team=team_name, sub_team=sub_team))

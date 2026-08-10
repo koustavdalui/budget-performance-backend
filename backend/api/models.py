@@ -102,15 +102,17 @@ class TacticLineMonth(Base):
 
 
 class TeamBudget(Base):
-    """Yearly budget allocated to a team by Marketing Ops - one number per
-    team per year, set before Plan even exists. Not tied to any campaign or
-    month, unlike plan/forecast/commit/actual. A team is considered to "exist"
-    if it has a row here (even with amount=None) - this doubles as the team
-    registry so a brand-new team survives before any campaign uses it."""
+    """Quarterly budget allocated to a team by Marketing Ops - one number per
+    team per year per quarter (Q1-Q4), set before Plan even exists. Not tied
+    to any campaign or month, unlike plan/forecast/commit/actual. A team is
+    considered to "exist" if it has at least one row here (even with
+    amount=None) - this doubles as the team registry so a brand-new team
+    survives before any campaign uses it."""
     __tablename__ = 'team_budgets'
 
     team = Column(String, primary_key=True)
     year = Column(Integer, primary_key=True)
+    quarter = Column(String, primary_key=True)  # 'Q1'..'Q4'
     amount = Column(Numeric)
 
 

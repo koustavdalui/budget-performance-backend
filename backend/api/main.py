@@ -224,11 +224,11 @@ def list_budgets(db: Session = Depends(get_db)):
     return db.query(TeamBudget).all()
 
 
-@app.put('/api/budgets/{team}/{year}', response_model=TeamBudgetOut)
-def upsert_budget(team: str, year: int, data: TeamBudgetIn, db: Session = Depends(get_db)):
-    b = db.get(TeamBudget, (team, year))
+@app.put('/api/budgets/{team}/{year}/{quarter}', response_model=TeamBudgetOut)
+def upsert_budget(team: str, year: int, quarter: str, data: TeamBudgetIn, db: Session = Depends(get_db)):
+    b = db.get(TeamBudget, (team, year, quarter))
     if not b:
-        b = TeamBudget(team=team, year=year)
+        b = TeamBudget(team=team, year=year, quarter=quarter)
         db.add(b)
     b.amount = data.amount
     db.commit()
@@ -247,11 +247,12 @@ def list_teams(db: Session = Depends(get_db)):
 
 @app.post('/api/teams', status_code=201)
 def create_team(data: TeamIn, db: Session = Depends(get_db)):
-    """Idempotent: registers the team by ensuring a budget row exists for it,
-    without touching the amount if one is already there."""
-    existing = db.get(TeamBudget, (data.team, DEFAULT_YEAR))
+    """Idempotent: registers the team by ensuring a budget row exists for it
+    (just Q1 is enough to mark existence - the team registry only needs one
+    row), without touching the amount if one is already there."""
+    existing = db.get(TeamBudget, (data.team, DEFAULT_YEAR, 'Q1'))
     if not existing:
-        db.add(TeamBudget(team=data.team, year=DEFAULT_YEAR, amount=None))
+        db.add(TeamBudget(team=data.team, year=DEFAULT_YEAR, quarter='Q1', amount=None))
         db.commit()
     return {'team': data.team}
 

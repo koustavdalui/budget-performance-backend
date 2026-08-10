@@ -62,6 +62,7 @@ class CampaignOut(CampaignIn):
 class TeamBudgetIn(BaseModel):
     team: str
     year: int
+    quarter: str
     amount: Optional[float] = None
 
 
