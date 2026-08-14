@@ -424,7 +424,12 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
             <select id="budgetYearSelect"></select>
           </div>
           <div id="budgetRows"></div>
-          <button class="entry-add-btn" id="addBudgetBtn" style="margin-top:10px;">+ Add / edit budget</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;">
+            <button class="entry-add-btn" id="addBudgetBtn">+ Add / edit budget</button>
+            <button class="reset-btn" id="budgetImportBtn">Bulk import</button>
+            <button class="reset-btn" id="budgetExportBtn">Export CSV</button>
+            <button class="reset-btn" id="budgetTemplateBtn">Download template</button>
+          </div>
         </div>
       </div>
 
@@ -2046,6 +2051,196 @@ function openBudgetModal(prefillTeam){
   };
 }
 
+// ---------- Team Budget CSV bulk import / export ----------
+// One row per team+year with Q1-Q4 columns (how Marketing Ops sets the
+// numbers). Blank quarter cells leave the existing amount unchanged; Action
+// Delete clears every quarter on that row. A team that isn't registered yet
+// is created by the import - team_budgets is the team registry.
+const BUDGET_CSV_COLS = ['Team','Year','Q1','Q2','Q3','Q4','Action'];
+
+function csvCell(row, name){
+  const k = Object.keys(row).find(x=>x.trim().toLowerCase()===name.toLowerCase());
+  return k===undefined ? '' : String(row[k]).trim();
+}
+function csvHasCol(row, name){
+  return Object.keys(row).some(x=>x.trim().toLowerCase()===name.toLowerCase());
+}
+function budgetCsvEscapeRow(obj){
+  return BUDGET_CSV_COLS.map(col => csvEscape(obj[col]===undefined||obj[col]===null ? '' : obj[col]));
+}
+function budgetsToWideRows(budgets, action){
+  const byKey = new Map();
+  (budgets||[]).forEach(b=>{
+    const k = b.team+'\t'+b.year;
+    if (!byKey.has(k)) byKey.set(k, {Team:b.team, Year:b.year, Q1:'', Q2:'', Q3:'', Q4:'', Action: action||'Update'});
+    if (BUDGET_QUARTERS.includes(b.quarter) && b.amount!=null) byKey.get(k)[b.quarter] = b.amount;
+  });
+  return [...byKey.values()].sort((a,b)=> a.Team.localeCompare(b.Team) || a.Year-b.Year);
+}
+function exportBudgetCSV(){
+  const rows = budgetsToWideRows(entryState.budgets, 'Update');
+  downloadTextFile('team-budgets-export.csv', [BUDGET_CSV_COLS.join(','), ...rows.map(r=>budgetCsvEscapeRow(r).join(','))].join('\n'));
+}
+function downloadBudgetTemplate(){
+  const sample = [
+    {Team:'Growth Marketing', Year:2026, Q1:250000, Q2:250000, Q3:250000, Q4:250000, Action:'Update'},
+    {Team:'Field Marketing', Year:2026, Q1:180000, Q2:180000, Q3:180000, Q4:180000, Action:'Update'},
+  ];
+  downloadTextFile('team-budgets-import-template.csv', [BUDGET_CSV_COLS.join(','), ...sample.map(r=>budgetCsvEscapeRow(r).join(','))].join('\n'));
+}
+
+function parseBudgetImportRows(rows){
+  if (!rows.length) return [];
+  const first = rows[0];
+  const isLong = csvHasCol(first, 'Quarter');
+  const seen = new Set();
+  return rows.map((raw, i)=>{
+    const line = i+2;
+    const team = csvCell(raw, 'Team');
+    const yearRaw = csvCell(raw, 'Year');
+    const actionRaw = csvCell(raw, 'Action');
+    const action = (actionRaw||'update').toLowerCase();
+    const errors = [];
+    const warnings = [];
+    if (!team) errors.push('Missing Team');
+    if (!yearRaw) errors.push('Missing Year');
+    else if (!/^\d{4}$/.test(yearRaw)) errors.push('Year must be a 4-digit year');
+    if (actionRaw && !['create','update','delete'].includes(action)) errors.push('Action must be Create, Update, or Delete (or blank)');
+    const year = /^\d{4}$/.test(yearRaw) ? parseInt(yearRaw, 10) : null;
+    const payloads = [];
+    const quarterAmounts = {};
+
+    const addQuarter = (q, rawAmt, required)=>{
+      const amt = (rawAmt==null) ? '' : String(rawAmt).trim();
+      if (amt==='' && !required && action!=='delete') return;
+      if (amt!=='' && isNaN(parseFloat(amt))){ errors.push(`${q} is not a number`); return; }
+      const amount = amt==='' ? null : parseFloat(amt);
+      quarterAmounts[q] = amount;
+      payloads.push({team, year, quarter:q, amount, action: action==='delete' ? 'delete' : 'update'});
+    };
+
+    if (isLong){
+      const q = csvCell(raw, 'Quarter').toUpperCase();
+      if (!BUDGET_QUARTERS.includes(q)) errors.push('Quarter must be Q1, Q2, Q3, or Q4');
+      else {
+        const key = team+'\t'+year+'\t'+q;
+        if (seen.has(key)) errors.push(`Duplicate ${team} ${year} ${q}`);
+        seen.add(key);
+        addQuarter(q, csvCell(raw, 'Amount'), true);
+      }
+    } else {
+      const key = team+'\t'+year;
+      if (team && year!=null){
+        if (seen.has(key)) errors.push(`Duplicate ${team} ${year}`);
+        seen.add(key);
+      }
+      if (action==='delete'){
+        BUDGET_QUARTERS.forEach(q=> addQuarter(q, '', true));
+      } else {
+        let any = false;
+        BUDGET_QUARTERS.forEach(q=>{
+          if (csvCell(raw, q)!==''){ any = true; addQuarter(q, csvCell(raw, q), false); }
+        });
+        if (!any) errors.push('At least one of Q1–Q4 must have a value (or use Action=Delete)');
+      }
+    }
+
+    if (team && entryState.teams.length && !entryState.teams.includes(team) && action!=='delete'){
+      warnings.push(`Will create new team "${team}"`);
+    }
+    return {line, team, year, action, quarterAmounts, payloads, errors, warnings};
+  }).filter(r=> r.team || r.year || r.payloads.length || r.errors.length);
+}
+
+let budgetImportParsed = null;
+function openBudgetImportModal(){
+  document.getElementById('importContent').innerHTML = `
+    <div class="modal-title">Bulk Import Team Budgets</div>
+    <div class="modal-meta" style="margin-bottom:12px;">
+      One row per <b>team + year</b>, with quarterly amounts in <b>Q1, Q2, Q3, Q4</b>.
+      Required: <b>Team, Year</b>, plus at least one quarter. Blank quarter cells leave
+      the existing amount unchanged. <b>Action</b> is Update (default) or Delete (clears
+      all four quarters for that team+year; the team stays registered).
+      A team that isn't in the registry yet is created by the import.
+      Long format (<b>Team, Year, Quarter, Amount</b>) is also accepted.
+    </div>
+    <div class="modal-actions-row" style="border-top:none;padding-top:0;margin-top:0;">
+      <label class="reset-btn" style="cursor:pointer;">Upload CSV<input type="file" accept=".csv,text/csv" id="budgetImportFileInput" hidden></label>
+      <button class="reset-btn" id="budgetImportTemplateBtn2">Download template</button>
+    </div>
+    <textarea class="import-textarea" id="budgetImportTextarea" placeholder="Team,Year,Q1,Q2,Q3,Q4,Action"></textarea>
+    <div class="modal-actions-row" style="border-top:none;padding-top:8px;">
+      <span></span>
+      <button class="primary-btn" id="budgetImportValidateBtn">Validate</button>
+    </div>
+    <div id="budgetImportReviewContainer"></div>
+  `;
+  document.getElementById('budgetImportFileInput').onchange = (e)=>{
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt)=>{ document.getElementById('budgetImportTextarea').value = evt.target.result; };
+    reader.readAsText(file);
+  };
+  document.getElementById('budgetImportTemplateBtn2').onclick = downloadBudgetTemplate;
+  document.getElementById('budgetImportValidateBtn').onclick = ()=>{
+    const text = document.getElementById('budgetImportTextarea').value.trim();
+    if (!text) return;
+    budgetImportParsed = parseBudgetImportRows(parseCSVText(text));
+    renderBudgetImportReview();
+  };
+  document.getElementById('importOverlay').classList.add('open');
+}
+
+function renderBudgetImportReview(){
+  const validCount = budgetImportParsed.filter(r=>r.errors.length===0).length;
+  document.getElementById('budgetImportReviewContainer').innerHTML = `
+    <div style="font-weight:650;font-size:13px;margin:10px 0 8px;">${validCount} of ${budgetImportParsed.length} row${budgetImportParsed.length!==1?'s':''} valid</div>
+    <div class="import-review">
+      ${budgetImportParsed.map(r=>{
+        const qs = BUDGET_QUARTERS.filter(q=>r.quarterAmounts[q]!==undefined).map(q=>`${q} ${r.action==='delete'?'(clear)':fmtMoney(r.quarterAmounts[q], false)}`).join(' · ');
+        const extra = r.errors.length ? r.errors.join('; ') : (r.warnings||[]).join('; ');
+        return `
+        <div class="import-review-row ${r.errors.length?'invalid':'valid'}">
+          <span class="import-action-badge">${r.action}</span>
+          <span>L${r.line}: ${escapeHtml(r.team||'?')} ${r.year||''}
+            ${qs?' &mdash; '+escapeHtml(qs):''}
+            ${extra?' &mdash; '+escapeHtml(extra):''}</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="modal-actions-row" style="border-top:none;">
+      <span></span>
+      <button class="primary-btn" id="budgetImportConfirmBtn" ${validCount===0?'disabled':''}>Import ${validCount} valid row${validCount!==1?'s':''}</button>
+    </div>
+  `;
+  const btn = document.getElementById('budgetImportConfirmBtn');
+  if (btn) btn.onclick = confirmBudgetImport;
+}
+
+async function confirmBudgetImport(){
+  const valid = budgetImportParsed.filter(r=>r.errors.length===0);
+  const rows = valid.flatMap(r=>r.payloads);
+  try{
+    const res = await apiFetch('/api/budgets/bulk', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rows}),
+    });
+    if (!res.ok){
+      const detail = await res.json().catch(()=>({}));
+      throw new Error(detail.detail || ('Server returned '+res.status));
+    }
+    const result = await res.json();
+    await loadTaxonomy();
+    renderTeamsSubteamsCard();
+    renderBudgetRows();
+    renderAll();
+    document.getElementById('importOverlay').classList.remove('open');
+    budgetImportParsed = null;
+    alert(`Budget import complete: ${result.upserted} upserted, ${result.deleted} cleared.`);
+  } catch(e){
+    alert('Could not import budgets: '+e.message);
+  }
+}
+
 // ---------- Live refresh from backend ----------
 async function refreshCampaignsFromBackend(rerenderDashboard){
   if (rerenderDashboard===undefined) rerenderDashboard = true;
@@ -2958,6 +3153,9 @@ document.getElementById('entryRetryBtn').onclick = checkBackendReachable;
 document.getElementById('entryAddBtn').onclick = ()=> openEntryCampaignModal(null);
 document.getElementById('addTeamBtn').onclick = openTeamModal;
 document.getElementById('addBudgetBtn').onclick = ()=> openBudgetModal();
+document.getElementById('budgetImportBtn').onclick = openBudgetImportModal;
+document.getElementById('budgetExportBtn').onclick = exportBudgetCSV;
+document.getElementById('budgetTemplateBtn').onclick = downloadBudgetTemplate;
 document.getElementById('entryImportBtn').onclick = openImportModal;
 document.getElementById('entryExportBtn').onclick = exportEntryCSV;
 document.getElementById('entryTemplateBtn').onclick = downloadCSVTemplate;

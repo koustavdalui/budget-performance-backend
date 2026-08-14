@@ -56,8 +56,9 @@ from it too.
 | POST | `/api/campaigns` | create a campaign |
 | PUT | `/api/campaigns/{id}` | replace a campaign (metadata + asset/tactic lines) |
 | DELETE | `/api/campaigns/{id}` | delete a campaign |
-| GET | `/api/budgets` | list all team budgets (any team, any year) |
-| PUT | `/api/budgets/{team}/{year}` | upsert a team's yearly budget amount |
+| GET | `/api/budgets` | list all team budgets (any team, any year, any quarter) |
+| PUT | `/api/budgets/{team}/{year}/{quarter}` | upsert a team's quarterly budget amount (Q1–Q4) |
+| POST | `/api/budgets/bulk` | upsert/clear many quarterly budget rows in one transaction; unknown teams are registered automatically |
 | GET | `/api/teams` | list registered teams (a team "exists" once it has a budget row, even with a null amount) |
 | POST | `/api/teams` | register a new team (idempotent) |
 | DELETE | `/api/teams/{team}` | delete a team - 400 if any campaign still uses it |
@@ -90,7 +91,7 @@ tagged with, many-to-many) + `asset_lines` → `asset_line_months` and
 `tactic_lines` → `tactic_line_months` (year, month, Plan/Forecast/Commit/
 Actual - the only place $ is stored, one pair of tables per line type). See
 `api/models.py` for the exact columns. `team_budgets` doubles as the team
-registry (year-aware: one row per team per year) and `team_subteams` as the
+registry (one row per team per year per quarter) and `team_subteams` as the
 sub-team registry.
 
 ## Data model note

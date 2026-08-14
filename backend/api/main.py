@@ -10,9 +10,31 @@ from db import get_db, init_db
 from models import (
     AssetLine, AssetLineMonth, Campaign, CampaignProduct, TacticLine, TacticLineMonth, TeamBudget, TeamSubteam,
 )
-from schemas import CampaignIn, CampaignOut, TeamBudgetIn, TeamBudgetOut, TeamIn, TeamSubteamIn
+from schemas import (
+    CampaignIn, CampaignOut, TeamBudgetBulkIn, TeamBudgetBulkOut, TeamBudgetIn, TeamBudgetOut,
+    TeamIn, TeamSubteamIn,
+)
 
 DEFAULT_YEAR = 2026  # the only year in play so far - a new team registers a budget row for this year
+VALID_QUARTERS = ('Q1', 'Q2', 'Q3', 'Q4')
+
+
+def _normalize_quarter(quarter: str) -> str:
+    q = (quarter or '').strip().upper()
+    if q not in VALID_QUARTERS:
+        raise HTTPException(400, f'Quarter must be one of {", ".join(VALID_QUARTERS)}')
+    return q
+
+
+def _upsert_budget_row(db: Session, team: str, year: int, quarter: str, amount):
+    """Creates the (team, year, quarter) row if needed and sets amount.
+    A new team is registered automatically - team_budgets is the team registry."""
+    b = db.get(TeamBudget, (team, year, quarter))
+    if not b:
+        b = TeamBudget(team=team, year=year, quarter=quarter)
+        db.add(b)
+    b.amount = amount
+    return b
 
 app = FastAPI(title='Marketing Budget Backend')
 
@@ -226,14 +248,43 @@ def list_budgets(db: Session = Depends(get_db)):
 
 @app.put('/api/budgets/{team}/{year}/{quarter}', response_model=TeamBudgetOut)
 def upsert_budget(team: str, year: int, quarter: str, data: TeamBudgetIn, db: Session = Depends(get_db)):
-    b = db.get(TeamBudget, (team, year, quarter))
-    if not b:
-        b = TeamBudget(team=team, year=year, quarter=quarter)
-        db.add(b)
-    b.amount = data.amount
+    quarter = _normalize_quarter(quarter)
+    b = _upsert_budget_row(db, team, year, quarter, data.amount)
     db.commit()
     db.refresh(b)
     return b
+
+
+@app.post('/api/budgets/bulk', response_model=TeamBudgetBulkOut)
+def bulk_upsert_budgets(data: TeamBudgetBulkIn, db: Session = Depends(get_db)):
+    """Upsert or clear many quarterly team budgets in one transaction.
+    Unknown teams are registered automatically (a budget row is how a team
+    comes into existence). action=delete clears that quarter's amount but
+    keeps the row so the team stays in the registry."""
+    upserted = 0
+    deleted = 0
+    for row in data.rows:
+        team = (row.team or '').strip()
+        if not team:
+            raise HTTPException(400, 'Each row needs a team')
+        quarter = _normalize_quarter(row.quarter)
+        action = (row.action or 'update').strip().lower()
+        if action not in ('update', 'create', 'delete'):
+            raise HTTPException(400, f'Action must be update, create, or delete (got "{row.action}")')
+        if action == 'delete':
+            b = db.get(TeamBudget, (team, row.year, quarter))
+            if b:
+                b.amount = None
+                deleted += 1
+        else:
+            _upsert_budget_row(db, team, row.year, quarter, row.amount)
+            upserted += 1
+    db.commit()
+    return {
+        'upserted': upserted,
+        'deleted': deleted,
+        'budgets': db.query(TeamBudget).all(),
+    }
 
 
 @app.get('/api/teams')

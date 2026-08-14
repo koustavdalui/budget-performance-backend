@@ -70,6 +70,24 @@ class TeamBudgetOut(TeamBudgetIn):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TeamBudgetBulkRow(BaseModel):
+    team: str
+    year: int
+    quarter: str
+    amount: Optional[float] = None
+    action: Optional[str] = 'update'  # update (default) or delete (clears amount)
+
+
+class TeamBudgetBulkIn(BaseModel):
+    rows: list[TeamBudgetBulkRow]
+
+
+class TeamBudgetBulkOut(BaseModel):
+    upserted: int
+    deleted: int
+    budgets: list[TeamBudgetOut]
+
+
 class TeamIn(BaseModel):
     team: str
 
