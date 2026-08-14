@@ -277,6 +277,13 @@ tr.row-campaign:hover td{background:var(--page);}
 .import-action-badge{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:10px;background:var(--page);color:var(--text-secondary);flex-shrink:0;white-space:nowrap;}
 .tablecard{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
 .datahead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
+.datahead-left{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;}
+.data-period{display:flex;flex-direction:column;gap:3px;}
+.data-period label{font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
+.data-period select{font-family:inherit;font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);}
+.data-period .msel{width:180px;}
+.data-period .msel-option{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:400;text-transform:none;color:var(--text-primary);}
+.data-period .msel-actions{display:flex;justify-content:flex-end;}
 .count-note{font-size:12px;color:var(--text-muted);}
 axis-label{font-size:11px;fill:var(--text-muted);}
 svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
@@ -383,7 +390,20 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
   <div id="panel-data" class="tab-panel">
     <div class="tablecard">
       <div class="datahead">
-        <input class="search-input" id="dataSearch" placeholder="Search campaigns...">
+        <div class="datahead-left">
+          <input class="search-input" id="dataSearch" placeholder="Search campaigns...">
+          <div class="data-period">
+            <label for="dataYearSelect">Year</label>
+            <select id="dataYearSelect"></select>
+          </div>
+          <div class="data-period">
+            <label>Months</label>
+            <div class="msel" id="dataMonthMsel">
+              <button type="button" class="msel-btn" id="dataMonthBtn">All months</button>
+              <div class="msel-panel" id="dataMonthPanel"></div>
+            </div>
+          </div>
+        </div>
         <div class="hier-controls">
           <button class="reset-btn" id="expandAllBtn">Expand all</button>
           <button class="reset-btn" id="collapseAllBtn">Collapse all</button>
@@ -425,7 +445,7 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
           </div>
           <div id="budgetRows"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;">
-            <button class="entry-add-btn" id="addBudgetBtn">+ Add / edit budget</button>
+            <button class="entry-add-btn" id="addBudgetBtn">+ Add</button>
             <button class="reset-btn" id="budgetImportBtn">Bulk import</button>
             <button class="reset-btn" id="budgetExportBtn">Export CSV</button>
             <button class="reset-btn" id="budgetTemplateBtn">Download template</button>
@@ -943,6 +963,11 @@ document.addEventListener('click', e=>{
     state.openFilterPanel = null;
     renderFilters();
   }
+  const monthMsel = document.getElementById('dataMonthMsel');
+  const monthPanel = document.getElementById('dataMonthPanel');
+  if (monthPanel && monthPanel.classList.contains('open') && monthMsel && !monthMsel.contains(e.target)){
+    monthPanel.classList.remove('open');
+  }
 });
 
 // ---------- budget (quarterly per team - see backend/api/models.py's TeamBudget) ----------
@@ -1202,9 +1227,8 @@ function openAllTeamsModal(){
 }
 
 // ---------- detail modal ----------
-// This detail modal always shows every year a campaign has data in - it's
-// reachable from the Data tab as well as the Dashboard, and the Data tab
-// never respects the Dashboard's Year selector (see allYearsMonthValue).
+// This detail modal always shows every year and month a campaign has data
+// in, even when the Data tab is filtered to one year / a subset of months.
 function campaignModalHTML(c){
   const years = Object.keys(c.months||{}).sort();
   const totalRows = years.map(y=>{
@@ -1548,8 +1572,11 @@ function renderTopCampaigns(campaigns, months){
   });
 }
 
-// ---------- data tab: Team > Sub Team > Campaign tree, full monthly Plan/Forecast/Commit ----------
+// ---------- data tab: Team > Sub Team > Campaign tree, monthly Plan/Forecast/Commit ----------
 const dataTreeState = { expandedTeams: new Set(), expandedSubTeams: new Set() };
+// Own year/month filters, independent of the Dashboard. The campaign popup
+// still shows every year and month the campaign has, regardless of these.
+const dataTabState = { year: defaultDashboardYear(), months: MONTHS.slice() };
 // Teams start expanded, sub teams start collapsed - "click to reveal" like the source tool.
 ALL_CAMPAIGNS.forEach(c=> dataTreeState.expandedTeams.add(c.team));
 
@@ -1562,18 +1589,70 @@ function buildTeamTree(campaigns){
   return tree;
 }
 
-// Month columns are grouped by year so a "Jan" cell never mixes two
-// different years' January together (that used to happen when the Data tab
-// summed a month name across every year via allYearsMonthValue/allYearsSum -
-// misleading once campaigns span more than one year). Each year present
-// gets its own Jan..Dec x Plan/Forecast/Commit block.
+// Columns are one selected year, then only the months checked in the Data
+// tab filter — so the table stays scrollable instead of laying every year
+// side by side. Empty month selection means all 12.
+function dataSelectedMonths(){
+  const ordered = MONTHS.filter(m=> (dataTabState.months||[]).includes(m));
+  return ordered.length ? ordered : MONTHS.slice();
+}
 function dataYearBlocks(){
   const years = campaignYears();
-  return years.length ? years : [new Date().getFullYear()];
+  const y = years.includes(dataTabState.year) ? dataTabState.year : (years.length ? years[years.length-1] : new Date().getFullYear());
+  dataTabState.year = y;
+  return [y];
+}
+
+function dataMonthBtnLabel(){
+  const sel = dataSelectedMonths();
+  if (sel.length===MONTHS.length) return 'All months';
+  if (sel.length<=3) return sel.join(', ');
+  return sel.length+' months';
+}
+
+function populateDataYearSelect(){
+  const sel = document.getElementById('dataYearSelect');
+  if (!sel) return;
+  const years = campaignYears();
+  const list = years.length ? years : [dataTabState.year];
+  if (!list.includes(dataTabState.year)) dataTabState.year = list[list.length-1];
+  sel.innerHTML = list.map(y=>`<option value="${y}" ${y===dataTabState.year?'selected':''}>${y}</option>`).join('');
+}
+
+function renderDataMonthPanel(){
+  const panel = document.getElementById('dataMonthPanel');
+  panel.innerHTML = `
+    <div class="msel-actions">
+      <button type="button" data-act="all">Select all</button>
+    </div>
+    ${MONTHS.map(m=>`
+      <label class="msel-option"><input type="checkbox" value="${m}" ${(dataTabState.months||[]).includes(m)?'checked':''}> ${m}</label>
+    `).join('')}
+  `;
+  document.getElementById('dataMonthBtn').textContent = dataMonthBtnLabel();
+  panel.querySelector('[data-act="all"]').onclick = (e)=>{
+    e.stopPropagation();
+    dataTabState.months = MONTHS.slice();
+    renderDataMonthPanel();
+    renderDataTab();
+  };
+  panel.querySelectorAll('.msel-option input').forEach(cb=>{
+    cb.onclick = (e)=>{
+      e.stopPropagation();
+      const arr = dataTabState.months;
+      const i = arr.indexOf(cb.value);
+      if (cb.checked){ if (i===-1) arr.push(cb.value); }
+      else if (i!==-1) arr.splice(i,1);
+      if (!arr.length) dataTabState.months = MONTHS.slice();
+      renderDataMonthPanel();
+      renderDataTab();
+    };
+  });
 }
 
 function renderDataThead(){
   const years = dataYearBlocks();
+  const months = dataSelectedMonths();
   const yearRow = ['<th class="sticky-col" rowspan="3" style="text-align:left">Hierarchy</th>',
     '<th rowspan="3" style="text-align:left">Campaign ID</th>',
     '<th rowspan="3">Product</th>', '<th rowspan="3">Tactic</th>', '<th rowspan="3">Region</th>',
@@ -1581,8 +1660,8 @@ function renderDataThead(){
   const monthRow = [];
   const metricRow = [];
   years.forEach(y=>{
-    yearRow.push(`<th class="month-group-th year-group-th" colspan="${MONTHS.length*3}"><span>${y}</span></th>`);
-    MONTHS.forEach(m=>{
+    yearRow.push(`<th class="month-group-th year-group-th" colspan="${months.length*3}"><span>${y}</span></th>`);
+    months.forEach(m=>{
       monthRow.push(`<th class="month-group-th" colspan="3">${m}</th>`);
       metricRow.push('<th>Plan</th><th>Forecast</th><th>Commit</th>');
     });
@@ -1593,11 +1672,11 @@ function renderDataThead(){
 }
 
 function dataRowColspan(){
-  return 7 + dataYearBlocks().length*MONTHS.length*3 + 1;
+  return 7 + dataYearBlocks().length*dataSelectedMonths().length*3 + 1;
 }
 
 function campaignRowHTML(c){
-  const cells = dataYearBlocks().map(y=> MONTHS.map(m=>{
+  const cells = dataYearBlocks().map(y=> dataSelectedMonths().map(m=>{
     const v = (c.months[y]||{})[m];
     return `<td>${fmtMoney(v?v.plan:null,false)}</td><td>${fmtMoney(v?v.forecast:null,false)}</td><td>${fmtMoney(v?v.commit:null,false)}</td>`;
   }).join('')).join('');
@@ -1626,7 +1705,7 @@ function yearMonthsSum(campaigns, year, months, metric){
 }
 
 function aggregateRowHTML(label, campaigns, level, expanded, key){
-  const cells = dataYearBlocks().map(y=> MONTHS.map(m=>{
+  const cells = dataYearBlocks().map(y=> dataSelectedMonths().map(m=>{
     const plan = yearMonthsSum(campaigns, y, [m], 'plan');
     const forecast = yearMonthsSum(campaigns, y, [m], 'forecast');
     const commit = yearMonthsSum(campaigns, y, [m], 'commit');
@@ -1644,6 +1723,8 @@ function aggregateRowHTML(label, campaigns, level, expanded, key){
 }
 
 function renderDataTab(){
+  populateDataYearSelect();
+  document.getElementById('dataMonthBtn').textContent = dataMonthBtnLabel();
   renderDataThead();
   const search = (document.getElementById('dataSearch').value||'').trim().toLowerCase();
   const el = document.getElementById('dataTbody');
@@ -1998,20 +2079,23 @@ function renderBudgetRows(){
   });
 }
 
-// ---------- Team Budget modal ("+ Add / edit budget" pops up, fill, save) ----------
-// Budget is quarterly, not yearly - one amount per team per year per Q1-Q4,
-// all four editable together for a given team+year since Marketing Ops sets
-// them as a set, not one quarter at a time.
+// ---------- Team Budget modal ----------
+// Edit (row button) prefills that team's current year amounts. Add (+ Add)
+// always opens blank - no team/year/amounts filled in - so it never looks
+// like you're overwriting an existing budget by accident.
 function openBudgetModal(prefillTeam){
   document.getElementById('modalBox').classList.remove('wide');
+  const isEdit = !!prefillTeam;
   const teams = [...entryState.teams].sort();
+  const teamOptions = (isEdit ? '' : '<option value="">Select team</option>') +
+    teams.map(t=>`<option ${t===prefillTeam?'selected':''}>${escapeHtml(t)}</option>`).join('');
   document.getElementById('modalContent').innerHTML = `
-    <div class="modal-title">Add / Edit Budget</div>
+    <div class="modal-title">${isEdit ? 'Edit Budget' : 'Add Budget'}</div>
     <div class="entry-form-grid" style="margin-bottom:16px;">
       <div class="entry-field"><label>Team</label>
-        <select id="bm-team">${teams.map(t=>`<option ${t===prefillTeam?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select>
+        <select id="bm-team">${teamOptions}</select>
       </div>
-      <div class="entry-field"><label>Year</label><input type="number" id="bm-year" value="${entryState.budgetYear}" step="1"></div>
+      <div class="entry-field"><label>Year</label><input type="number" id="bm-year" value="${isEdit ? entryState.budgetYear : ''}" step="1" placeholder="e.g. 2026"></div>
       ${BUDGET_QUARTERS.map(q=>`<div class="entry-field"><label>${q} Amount</label><input type="number" id="bm-amount-${q}" step="0.01" placeholder="0"></div>`).join('')}
     </div>
     <div class="modal-actions-row">
@@ -2025,19 +2109,23 @@ function openBudgetModal(prefillTeam){
   const teamSel = document.getElementById('bm-team');
   const yearInp = document.getElementById('bm-year');
   const amtInputs = BUDGET_QUARTERS.map(q=>document.getElementById(`bm-amount-${q}`));
-  const prefillAmounts = ()=>{
-    BUDGET_QUARTERS.forEach((q,i)=>{
-      const b = entryState.budgets.find(x=>x.team===teamSel.value && x.year===+yearInp.value && x.quarter===q);
-      amtInputs[i].value = (b && b.amount!==null && b.amount!==undefined) ? b.amount : '';
-    });
-  };
-  prefillAmounts();
-  teamSel.onchange = prefillAmounts;
-  yearInp.onchange = prefillAmounts;
+  if (isEdit){
+    const prefillAmounts = ()=>{
+      BUDGET_QUARTERS.forEach((q,i)=>{
+        const b = entryState.budgets.find(x=>x.team===teamSel.value && x.year===+yearInp.value && x.quarter===q);
+        amtInputs[i].value = (b && b.amount!==null && b.amount!==undefined) ? b.amount : '';
+      });
+    };
+    prefillAmounts();
+    teamSel.onchange = prefillAmounts;
+    yearInp.onchange = prefillAmounts;
+  }
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('bm-cancel').onclick = closeModal;
   document.getElementById('bm-save').onclick = async ()=>{
-    const team = teamSel.value, year = +yearInp.value;
+    const team = teamSel.value.trim(), year = +yearInp.value;
+    if (!team){ alert('Pick a team.'); return; }
+    if (!year){ alert('Enter a year.'); return; }
     try{
       await Promise.all(BUDGET_QUARTERS.map((q,i)=>{
         const amount = amtInputs[i].value==='' ? null : parseFloat(amtInputs[i].value);
@@ -2844,7 +2932,11 @@ function parseCSVText(text){
 // position, so the parser groups rows by Campaign before building a payload -
 // this is what let historical multi-asset/multi-tactic data import cleanly,
 // unlike the old metadata-only CSV which had nowhere to put $ at all.
-const CSV_CAMPAIGN_COLS = ['Type','Campaign','CampaignId','Team','SubTeam','Region','Products','CampaignType','SubCampaignType','Theme','Objective','Comments','StartDate','EndDate','ConvRate','Action','LineName','Year'];
+// Official Marketing Ops template column order (Action first, Comments last
+// after the monthly $ columns). Import still matches by header name, so an
+// older file with the same column names still validates.
+const CSV_CAMPAIGN_COLS_BEFORE_MONTHS = ['Action','Team','SubTeam','Campaign','SubCampaignType','CampaignType','CampaignId','Type','LineName','Region','Products','Theme','Objective','StartDate','EndDate','ConvRate','Year'];
+const CSV_CAMPAIGN_COLS_AFTER_MONTHS = ['Comments'];
 const CSV_METRICS = ['plan','forecast','commit','actual'];
 const CSV_METRIC_LABELS = {plan:'Plan', forecast:'Forecast', commit:'Commit', actual:'Actual'};
 
@@ -2854,7 +2946,7 @@ function csvMonthColNames(){
   return cols;
 }
 function csvHeader(){
-  return [...CSV_CAMPAIGN_COLS, ...csvMonthColNames()];
+  return [...CSV_CAMPAIGN_COLS_BEFORE_MONTHS, ...csvMonthColNames(), ...CSV_CAMPAIGN_COLS_AFTER_MONTHS];
 }
 function csvEscape(v){
   const s = v===null||v===undefined ? '' : String(v);
@@ -2924,22 +3016,13 @@ function downloadCSVTemplate(){
       comments: 'Example row - delete me', startDate: '2026-08-01', endDate: '2026-09-30', convRate: 0.78,
       assetLines: [
         {asset: 'Landing Page Copy', months: {2026: {Aug: {plan:5000, forecast:5000, commit:4800, actual:null}, Sep: {plan:5200, forecast:5200, commit:null, actual:null}}}},
-        {asset: 'Creative Assets', months: {2026: {Aug: {plan:2000, forecast:2000, commit:1900, actual:null}}}},
       ],
-      // One tactic line spanning two years - shows how a line that runs past
-      // year-end just gets a second row with the same Type/Campaign/LineName.
-      tacticLines: [
-        {tactic: 'Paid Search', months: {
-          2026: {Aug: {plan:3000, forecast:3000, commit:2800, actual:null}, Sep: {plan:3200, forecast:3200, commit:null, actual:null}},
-          2027: {Jan: {plan:3500, forecast:3500, commit:null, actual:null}},
-        }},
-      ],
+      tacticLines: [],
     },
     {
       campaign: 'Field Event APAC Example', campaignId: '', team: 'Field Marketing', subTeam: 'FM-APAC',
       region: 'APAC', products: [], campaignType: 'Event', subCampaignType: 'Third-Party Event',
       theme: '', objective: '', comments: 'Example row - delete me', startDate: '2026-10-01', endDate: '2026-10-03', convRate: null,
-      // Field Marketing has no tactic taxonomy - three asset lines, no tactic lines, same as real FM campaigns.
       assetLines: [
         {asset: 'Event Sponsorship', months: {2026: {Oct: {plan:15000, forecast:15000, commit:14500, actual:null}}}},
         {asset: 'Booth', months: {2026: {Oct: {plan:8000, forecast:8000, commit:7600, actual:null}}}},
@@ -3059,12 +3142,13 @@ function openImportModal(){
   document.getElementById('importContent').innerHTML = `
     <div class="modal-title">Bulk Import</div>
     <div class="modal-meta" style="margin-bottom:12px;">
+      Use the official template (Action, Team, SubTeam, Campaign, &hellip; Year, monthly $, Comments).
       One <b>Campaign</b>-type row per campaign (metadata), followed by any number of
       <b>Asset</b>/<b>Tactic</b>-type rows carrying that line's monthly Plan/Forecast/Commit/Actual $
       &mdash; one row per year a line has data in. Rows link by <b>Campaign</b> name, not position.
       Required on the Campaign row: <b>Campaign, Team</b>. Required on Asset/Tactic rows: <b>LineName, Year</b>
-      (Year can be blank only if the line has no $ at all, e.g. a tag with no spend recorded).
-      <b>Action</b> (Create/Update/Delete, blank upserts) lives only on the Campaign row.
+      (Year can be blank only if the line has no $ at all).
+      <b>Action</b> (Create/Update/Delete, blank upserts) lives on the Campaign row.
       Blank metadata cells on an Update keep the existing value; a campaign with zero Asset/Tactic
       rows in this import keeps its existing lines untouched, but including even one Asset or Tactic
       row replaces that line type's data entirely with what's in the CSV.
@@ -3073,7 +3157,7 @@ function openImportModal(){
       <label class="reset-btn" style="cursor:pointer;">Upload CSV<input type="file" accept=".csv,text/csv" id="importFileInput" hidden></label>
       <button class="reset-btn" id="importTemplateBtn2">Download template</button>
     </div>
-    <textarea class="import-textarea" id="importTextarea" placeholder="Type,Campaign,CampaignId,Team,..."></textarea>
+    <textarea class="import-textarea" id="importTextarea" placeholder="Action,Team,SubTeam,Campaign,SubCampaignType,CampaignType,..."></textarea>
     <div class="modal-actions-row" style="border-top:none;padding-top:8px;">
       <span></span>
       <button class="primary-btn" id="importValidateBtn">Validate</button>
@@ -3174,6 +3258,17 @@ document.querySelectorAll('.tab-btn').forEach(b=>{
   };
 });
 document.getElementById('dataSearch').addEventListener('input', renderDataTab);
+document.getElementById('dataYearSelect').addEventListener('change', e=>{
+  dataTabState.year = +e.target.value;
+  renderDataTab();
+});
+document.getElementById('dataMonthBtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  const panel = document.getElementById('dataMonthPanel');
+  const opening = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+  if (opening) renderDataMonthPanel();
+});
 
 // Dashboard/Data always prefer live backend data over the embedded
 // build-time snapshot - the snapshot only exists so this file still shows
