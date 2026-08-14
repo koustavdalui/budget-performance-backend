@@ -6,7 +6,6 @@ Import still sends the same text fields the API already stores.
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
@@ -79,12 +78,13 @@ def main():
     wb = Workbook()
 
     lists = wb.active
-    lists.title = 'Lists'
+    lists.title = 'DropdownLists'
     lists['A1'] = 'CampaignType'
     lists['B1'] = 'Type'
     lists['C1'] = 'Action'
     lists['D1'] = 'Asset'
     lists['E1'] = 'Tactic'
+    lists['F1'] = 'Campaign'
     for i, name in enumerate(CAMPAIGN_TYPE_SUBTYPES, start=2):
         lists.cell(i, 1, name)
     for i, name in enumerate(['Campaign', 'Asset', 'Tactic'], start=2):
@@ -95,6 +95,7 @@ def main():
         lists.cell(i, 4, name)
     for i, name in enumerate(TACTIC_LINE_NAMES, start=2):
         lists.cell(i, 5, name)
+    lists['F2'] = '(leave LineName blank)'
 
     # One column per campaign type, values = its subtypes (for INDIRECT named ranges).
     subtype_start_col = 7
@@ -107,23 +108,23 @@ def main():
         letter = get_column_letter(col)
         wb.defined_names.add(DefinedName(
             name=excel_name(ctype),
-            attr_text=f'Lists!${letter}$2:${letter}${last}',
+            attr_text=f'DropdownLists!${letter}$2:${letter}${last}',
         ))
 
     n_types = len(CAMPAIGN_TYPE_SUBTYPES)
     n_assets = len(ASSET_LINE_NAMES)
     n_tactics = len(TACTIC_LINE_NAMES)
-    wb.defined_names.add(DefinedName('CampaignTypeList', attr_text=f'Lists!$A$2:$A${1+n_types}'))
-    wb.defined_names.add(DefinedName('TypeList', attr_text='Lists!$B$2:$B$4'))
-    wb.defined_names.add(DefinedName('ActionList', attr_text='Lists!$C$2:$C$4'))
-    wb.defined_names.add(DefinedName('Asset', attr_text=f'Lists!$D$2:$D${1+n_assets}'))
-    wb.defined_names.add(DefinedName('Tactic', attr_text=f'Lists!$E$2:$E${1+n_tactics}'))
-    # Type=Campaign rows should not pick a LineName.
-    lists['F1'] = 'Campaign'
-    lists['F2'] = ''
-    wb.defined_names.add(DefinedName('Campaign', attr_text='Lists!$F$2:$F$2'))
+    wb.defined_names.add(DefinedName('CampaignTypeList', attr_text=f'DropdownLists!$A$2:$A${1+n_types}'))
+    wb.defined_names.add(DefinedName('TypeList', attr_text='DropdownLists!$B$2:$B$4'))
+    wb.defined_names.add(DefinedName('ActionList', attr_text='DropdownLists!$C$2:$C$4'))
+    wb.defined_names.add(DefinedName('Asset', attr_text=f'DropdownLists!$D$2:$D${1+n_assets}'))
+    wb.defined_names.add(DefinedName('Tactic', attr_text=f'DropdownLists!$E$2:$E${1+n_tactics}'))
+    wb.defined_names.add(DefinedName('Campaign', attr_text='DropdownLists!$F$2:$F$2'))
 
-    lists.sheet_state = 'hidden'
+    for col in range(1, subtype_start_col + len(CAMPAIGN_TYPE_SUBTYPES)):
+        lists.column_dimensions[get_column_letter(col)].width = 28
+    lists.freeze_panes = 'A2'
+    lists.sheet_properties.tabColor = '1584A6'
 
     ws = wb.create_sheet('Import', 0)
     header_fill = PatternFill('solid', fgColor='F76918')
@@ -141,7 +142,6 @@ def main():
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
         cell.border = thin
     ws.freeze_panes = 'A2'
-    ws.auto_filter.ref = f'A1:{get_column_letter(len(HEADER))}1'
     ws.row_dimensions[1].height = 28
 
     widths = {
@@ -217,17 +217,17 @@ def main():
         dv.add(cells)
         ws.add_data_validation(dv)
 
-    add_list_dv('=ActionList', f'{action_col}2:{action_col}{MAX_ROW}',
+    add_list_dv('=DropdownLists!$C$2:$C$4', f'{action_col}2:{action_col}{MAX_ROW}',
                 'Create, Update, or Delete', 'Pick Create, Update, or Delete')
-    add_list_dv('=CampaignTypeList', f'{ctype_col}2:{ctype_col}{MAX_ROW}',
+    add_list_dv(f'=DropdownLists!$A$2:$A${1+n_types}', f'{ctype_col}2:{ctype_col}{MAX_ROW}',
                 'Pick a campaign type first', 'Pick a campaign type from the list')
     add_list_dv(
         f'=INDIRECT(SUBSTITUTE(${ctype_col}2," ","_"))',
         f'{subtype_col}2:{subtype_col}{MAX_ROW}',
-        'Pick a campaign type in this row first, then a matching sub type',
+        'Pick CampaignType in this row first, then a matching sub type',
         'That sub type does not belong to the selected campaign type',
     )
-    add_list_dv('=TypeList', f'{type_col}2:{type_col}{MAX_ROW}',
+    add_list_dv('=DropdownLists!$B$2:$B$4', f'{type_col}2:{type_col}{MAX_ROW}',
                 'Campaign (metadata), Asset, or Tactic (spend line)',
                 'Pick Campaign, Asset, or Tactic')
     add_list_dv(
@@ -237,20 +237,13 @@ def main():
         'LineName must match the Type (Asset list or Tactic list)',
     )
 
-    ws[f'{ctype_col}1'].comment = Comment(
-        'Fill CampaignType first. SubCampaignType dropdown then shows only matching values.',
-        'Budget app',
-    )
-    ws[f'{line_col}1'].comment = Comment(
-        'For Type=Asset or Type=Tactic rows. Campaign rows leave LineName blank.',
-        'Budget app',
-    )
-
     notes = wb.create_sheet('How to fill')
     notes['A1'] = 'How to fill this template'
     notes['A1'].font = Font(bold=True, size=14)
-    notes.merge_cells('A3:A12')
+    notes.merge_cells('A3:A14')
     notes['A3'] = (
+        'Open this file in Microsoft Excel (desktop). Google Sheets, Excel for the web, and Apple Numbers often ignore these dropdowns.\n'
+        '\n'
         '1. Keep the Import sheet headers as they are.\n'
         '2. One Type=Campaign row per campaign (Team, Campaign, CampaignType, SubCampaignType, …).\n'
         '3. Then one Type=Asset or Type=Tactic row per spend line. Rows link by Campaign name.\n'
@@ -258,12 +251,13 @@ def main():
         '5. Pick Type = Asset or Tactic — LineName then only shows that list.\n'
         '6. Leave LineName blank on Campaign rows.\n'
         '7. Delete the example rows before importing real data.\n'
-        '8. Upload this .xlsx (or Save As CSV) in Data Entry → Bulk import.\n'
-        '9. Values are saved as the same text fields as the campaign form — no extra database columns.'
+        '8. Upload this .xlsx in Data Entry → Bulk import.\n'
+        '9. Do not delete the DropdownLists sheet — the dropdowns read from it.\n'
+        '10. Values are saved as the same text fields as the campaign form.'
     )
     notes['A3'].alignment = Alignment(wrap_text=True, vertical='top')
     notes.column_dimensions['A'].width = 100
-    notes.row_dimensions[3].height = 160
+    notes.row_dimensions[3].height = 200
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     wb.save(OUT)

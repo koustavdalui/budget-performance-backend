@@ -3226,7 +3226,7 @@ async function readImportFileAsCsv(file){
     await loadXlsxLib();
     const buf = await file.arrayBuffer();
     const wb = window.XLSX.read(buf, {type:'array'});
-    const sheetName = wb.SheetNames.find(n=> n!=='Lists' && n!=='How to fill') || wb.SheetNames[0];
+    const sheetName = wb.SheetNames.find(n=> n==='Import') || wb.SheetNames.find(n=> n!=='DropdownLists' && n!=='Lists' && n!=='How to fill') || wb.SheetNames[0];
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:'', raw:false})
       .map(normalizeImportRow)
       .filter(r=> Object.values(r).some(v=>v!==''));
@@ -3239,7 +3239,9 @@ function openImportModal(){
   document.getElementById('importContent').innerHTML = `
     <div class="modal-title">Bulk Import</div>
     <div class="modal-meta" style="margin-bottom:12px;">
-      Download the Excel template — CampaignType filters SubCampaignType, and Type (Asset/Tactic) filters LineName.
+      Download the Excel template and open it in <b>Microsoft Excel</b> (desktop).
+      Google Sheets and Apple Numbers often hide the dropdowns.
+      CampaignType filters SubCampaignType, and Type (Asset/Tactic) filters LineName.
       One <b>Campaign</b>-type row per campaign (metadata), followed by any number of
       <b>Asset</b>/<b>Tactic</b>-type rows carrying that line's monthly Plan/Forecast/Commit/Actual $
       &mdash; one row per year a line has data in. Rows link by <b>Campaign</b> name, not position.
