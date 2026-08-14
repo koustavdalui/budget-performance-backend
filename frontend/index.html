@@ -2948,6 +2948,32 @@ function csvMonthColNames(){
 function csvHeader(){
   return [...CSV_CAMPAIGN_COLS_BEFORE_MONTHS, ...csvMonthColNames(), ...CSV_CAMPAIGN_COLS_AFTER_MONTHS];
 }
+
+// Dropdown lists for the Excel template (and import validation). Same values
+// the .xlsx named ranges use — changing these means re-running
+// scripts/build_campaign_import_template.py.
+const IMPORT_CAMPAIGN_TYPE_SUBTYPES = {
+  'Webinar': ['Webinar'],
+  'Event': ['Virtual Event','In-Person Event','Executive Dinner','Workshop','Customer Event','Partner Event','Third-Party Event'],
+  'Email': ['Email Campaign','Nurture Campaign'],
+  'Paid': ['Paid Search','Paid Social','Display'],
+  'Organic': ['Organic Social','Organic Search'],
+  'Content Syndication': ['Content Syndication'],
+  'Website Gated': ['Demo Request'],
+  'Referral': ['Referral Traffic'],
+  'Direct Mail': ['Direct Mail'],
+};
+const IMPORT_ASSET_LINE_NAMES = ['1:1 Meeting','Agency Retainer','Battle Cards','Blog','Booth','Case Studies','Contact Request','Demand Gen Page','eBook','Employment Guide','Event Registrations','Event Sponsorship','Goodies/Swag','Guide','Infographics','Inquiry','Interactive Asset','Interactive Demos','Landing Page Copy','Marketing Emails','Marketplace Signups','Newsletter','On-Demand Webinar','Other Miscellaneous','Partner Lead Submission','Podcast','Presentation','Promotion fee for ISV/Channel Partner','Reports','ROI Calculator','Survey','Translations & Localizations','Trial Signups','Video','Web Content Management','Whitepaper','Travel & Accom','Activations','Others'];
+const IMPORT_TACTIC_LINE_NAMES = ['AE Emails','Agency Retainer','Chat','Content Syndication','Customer Retention & Growth','Direct Mails','Direct Traffic','Display','External List Buys','In-Product','Influencer','Internal Referral','Marketing Emails','Newsletter','Organic Search','Organic Social','Outbound Prospecting','Paid Search','Paid Media','Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations','Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing'];
+
+function normalizeImportRow(obj){
+  const out = {};
+  Object.keys(obj||{}).forEach(k=>{
+    const v = obj[k];
+    out[String(k).trim()] = (v===null||v===undefined) ? '' : String(v).trim();
+  });
+  return out;
+}
 function csvEscape(v){
   const s = v===null||v===undefined ? '' : String(v);
   if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"'+s.replace(/"/g,'""')+'"';
@@ -3008,6 +3034,29 @@ function exportEntryCSV(){
   downloadTextFile('budget-export.csv', [csvHeader().join(','), ...rows.map(r=>r.map(csvEscape).join(','))].join('\n'));
 }
 function downloadCSVTemplate(){
+  downloadCampaignImportTemplate();
+}
+
+async function downloadCampaignImportTemplate(){
+  const hrefs = ['campaign-import-template.xlsx', 'frontend/campaign-import-template.xlsx'];
+  for (const href of hrefs){
+    try{
+      const res = await fetch(href);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'campaign-import-template.xlsx';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    } catch(e){ /* try the next path (file:// vs hosted frontend/) */ }
+  }
+  downloadCampaignImportCsvFallback();
+  alert('Excel template was not reachable, so a CSV copy was downloaded instead. Open the live dashboard to get the .xlsx with dropdowns.');
+}
+
+function downloadCampaignImportCsvFallback(){
   const sampleCampaigns = [
     {
       campaign: 'EOR SEA Launch Example', campaignId: '', team: 'Growth Marketing', subTeam: 'Paid',
@@ -3110,7 +3159,7 @@ function importGroupToPayload(g, existing){
 }
 
 function validateImportGroups(rows){
-  const groups = groupImportRows(rows);
+  const groups = groupImportRows(rows.map(normalizeImportRow));
   return groups.map(g=>{
     const errors = [];
     if (!g.campaignRow){
@@ -3123,9 +3172,22 @@ function validateImportGroups(rows){
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
     if (cRow.Team && entryState.teams.length && !entryState.teams.includes(cRow.Team)) errors.push(`Team must be one of: ${entryState.teams.join(', ')}`);
     if (cRow.ConvRate && isNaN(parseFloat(cRow.ConvRate))) errors.push('ConvRate is not a number');
+    const ctype = (cRow.CampaignType||'').trim();
+    const stype = (cRow.SubCampaignType||'').trim();
+    if (ctype && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype]) errors.push(`CampaignType must be one of: ${Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES).join(', ')}`);
+    if (stype){
+      if (ctype && IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype] && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype].includes(stype)){
+        errors.push(`SubCampaignType "${stype}" is not valid for CampaignType "${ctype}"`);
+      } else if (!ctype){
+        const known = Object.values(IMPORT_CAMPAIGN_TYPE_SUBTYPES).some(list=>list.includes(stype));
+        if (!known) errors.push(`Unknown SubCampaignType "${stype}"`);
+      }
+    }
     g.lineRows.forEach(({row, index, type})=>{
       if (!['Asset','Tactic'].includes(type)) errors.push(`L${index}: Type must be Asset, Tactic, or Campaign`);
       if (!row.LineName) errors.push(`L${index}: Missing LineName`);
+      if (type==='Asset' && row.LineName && !IMPORT_ASSET_LINE_NAMES.includes(row.LineName)) errors.push(`L${index}: LineName is not in the Asset list`);
+      if (type==='Tactic' && row.LineName && !IMPORT_TACTIC_LINE_NAMES.includes(row.LineName)) errors.push(`L${index}: LineName is not in the Tactic list`);
       if (row.Year && !/^\d{4}$/.test(row.Year.trim())) errors.push(`L${index}: Year must be a 4-digit year`);
       MONTHS.forEach(m=> CSV_METRICS.forEach(met=>{
         const key = `${m} ${CSV_METRIC_LABELS[met]}`;
@@ -3138,11 +3200,46 @@ function validateImportGroups(rows){
 }
 
 let importParsedGroups = null;
+
+function loadXlsxLib(){
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = ()=> reject(new Error('Could not load the Excel reader'));
+    document.head.appendChild(s);
+  });
+}
+
+function importRowsToCsvText(rows){
+  const header = csvHeader();
+  const extra = [];
+  rows.forEach(r=> Object.keys(r).forEach(k=>{ if (!header.includes(k) && k && !extra.includes(k)) extra.push(k); }));
+  const cols = extra.length ? [...header, ...extra] : header;
+  return [cols.join(','), ...rows.map(r=> cols.map(h=> csvEscape(r[h]||'')).join(','))].join('\n');
+}
+
+async function readImportFileAsCsv(file){
+  const name = (file.name||'').toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls') || file.type.includes('spreadsheet')){
+    await loadXlsxLib();
+    const buf = await file.arrayBuffer();
+    const wb = window.XLSX.read(buf, {type:'array'});
+    const sheetName = wb.SheetNames.find(n=> n!=='Lists' && n!=='How to fill') || wb.SheetNames[0];
+    const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:'', raw:false})
+      .map(normalizeImportRow)
+      .filter(r=> Object.values(r).some(v=>v!==''));
+    return importRowsToCsvText(rows);
+  }
+  return await file.text();
+}
+
 function openImportModal(){
   document.getElementById('importContent').innerHTML = `
     <div class="modal-title">Bulk Import</div>
     <div class="modal-meta" style="margin-bottom:12px;">
-      Use the official template (Action, Team, SubTeam, Campaign, &hellip; Year, monthly $, Comments).
+      Download the Excel template — CampaignType filters SubCampaignType, and Type (Asset/Tactic) filters LineName.
       One <b>Campaign</b>-type row per campaign (metadata), followed by any number of
       <b>Asset</b>/<b>Tactic</b>-type rows carrying that line's monthly Plan/Forecast/Commit/Actual $
       &mdash; one row per year a line has data in. Rows link by <b>Campaign</b> name, not position.
@@ -3151,10 +3248,11 @@ function openImportModal(){
       <b>Action</b> (Create/Update/Delete, blank upserts) lives on the Campaign row.
       Blank metadata cells on an Update keep the existing value; a campaign with zero Asset/Tactic
       rows in this import keeps its existing lines untouched, but including even one Asset or Tactic
-      row replaces that line type's data entirely with what's in the CSV.
+      row replaces that line type's data entirely with what's in the file.
+      Upload the filled <b>.xlsx</b> or a CSV export — values are the same text fields already saved to Postgres.
     </div>
     <div class="modal-actions-row" style="border-top:none;padding-top:0;margin-top:0;">
-      <label class="reset-btn" style="cursor:pointer;">Upload CSV<input type="file" accept=".csv,text/csv" id="importFileInput" hidden></label>
+      <label class="reset-btn" style="cursor:pointer;">Upload file<input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" id="importFileInput" hidden></label>
       <button class="reset-btn" id="importTemplateBtn2">Download template</button>
     </div>
     <textarea class="import-textarea" id="importTextarea" placeholder="Action,Team,SubTeam,Campaign,SubCampaignType,CampaignType,..."></textarea>
@@ -3164,11 +3262,14 @@ function openImportModal(){
     </div>
     <div id="importReviewContainer"></div>
   `;
-  document.getElementById('importFileInput').onchange = (e)=>{
+  document.getElementById('importFileInput').onchange = async (e)=>{
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt)=>{ document.getElementById('importTextarea').value = evt.target.result; };
-    reader.readAsText(file);
+    try{
+      const text = await readImportFileAsCsv(file);
+      document.getElementById('importTextarea').value = text;
+    } catch(err){
+      alert('Could not read that file: '+(err.message||err));
+    }
   };
   document.getElementById('importTemplateBtn2').onclick = downloadCSVTemplate;
   document.getElementById('importValidateBtn').onclick = ()=>{
