@@ -282,6 +282,8 @@ tr.row-campaign:hover td{background:var(--page);}
 .data-period label{font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
 .data-period select{font-family:inherit;font-size:13px;padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);}
 .data-period .msel{width:180px;}
+.data-period .pillgroup{width:max-content;}
+.data-period .pillgroup button{flex:none;}
 .data-period .msel-option{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:400;text-transform:none;color:var(--text-primary);}
 .data-period .msel-actions{display:flex;justify-content:flex-end;}
 .count-note{font-size:12px;color:var(--text-muted);}
@@ -455,7 +457,27 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
 
       <div class="tablecard">
         <div class="datahead">
-          <div style="font-weight:650;font-size:15px;">Campaigns</div>
+          <div class="datahead-left">
+            <div style="font-weight:650;font-size:15px;padding-bottom:2px;">Campaigns</div>
+            <div class="data-period">
+              <label for="entryYearSelect">Year</label>
+              <select id="entryYearSelect"></select>
+            </div>
+            <div class="data-period">
+              <label>Period</label>
+              <div class="pillgroup" id="entryPeriodMode">
+                <button type="button" data-mode="quarter" class="active">Quarterly</button>
+                <button type="button" data-mode="month">Monthly</button>
+              </div>
+            </div>
+            <div class="data-period">
+              <label id="entryPeriodLabel">Quarters</label>
+              <div class="msel" id="entryPeriodMsel">
+                <button type="button" class="msel-btn" id="entryPeriodBtn">All quarters</button>
+                <div class="msel-panel" id="entryPeriodPanel"></div>
+              </div>
+            </div>
+          </div>
           <div class="hier-controls">
             <button class="primary-btn" id="entryAddBtn">+ Add campaign</button>
             <button class="reset-btn" id="entryImportBtn">Bulk import</button>
@@ -967,6 +989,11 @@ document.addEventListener('click', e=>{
   const monthPanel = document.getElementById('dataMonthPanel');
   if (monthPanel && monthPanel.classList.contains('open') && monthMsel && !monthMsel.contains(e.target)){
     monthPanel.classList.remove('open');
+  }
+  const entryMsel = document.getElementById('entryPeriodMsel');
+  const entryPanel = document.getElementById('entryPeriodPanel');
+  if (entryPanel && entryPanel.classList.contains('open') && entryMsel && !entryMsel.contains(e.target)){
+    entryPanel.classList.remove('open');
   }
 });
 
@@ -1842,6 +1869,128 @@ const TACTIC_TAXONOMY = ['AE Emails','Agency Retainer','Chat','Content Syndicati
   'Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations',
   'Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing'];
 const entryTreeState = { expandedTeams: new Set(), expandedSubTeams: new Set(), seenTeams: new Set() };
+// Own year / quarter / month filters for Data Entry campaign totals — independent
+// of the Dashboard and of the Data tab. Empty quarter/month lists mean "all".
+const entryCampaignState = { year: defaultDashboardYear(), periodMode: 'quarter', quarters: [], months: [] };
+
+function entryCampaignYears(){
+  const set = new Set(campaignYears());
+  ENTRY_CAMPAIGNS.forEach(c=> Object.keys(c.months||{}).forEach(y=> set.add(+y)));
+  (entryState.budgets||[]).forEach(b=> set.add(b.year));
+  const years = [...set].filter(y=>y).sort((a,b)=>a-b);
+  return years.length ? years : [entryCampaignState.year];
+}
+
+function entrySelectedMonths(){
+  if (entryCampaignState.periodMode==='quarter'){
+    const qs = entryCampaignState.quarters.length ? entryCampaignState.quarters : QUARTERS.map(q=>q.key);
+    return QUARTERS.filter(q=>qs.includes(q.key)).flatMap(q=>MONTHS.slice(q.from, q.to+1));
+  }
+  const picked = entryCampaignState.months;
+  return picked.length ? MONTHS.filter(m=>picked.includes(m)) : MONTHS.slice();
+}
+
+function entryPeriodBtnLabel(){
+  if (entryCampaignState.periodMode==='quarter'){
+    const qs = entryCampaignState.quarters;
+    if (!qs.length || qs.length===4) return 'All quarters';
+    return qs.length===1 ? qs[0] : qs.length+' quarters';
+  }
+  const ms = entryCampaignState.months;
+  if (!ms.length || ms.length===MONTHS.length) return 'All months';
+  if (ms.length<=3) return MONTHS.filter(m=>ms.includes(m)).join(', ');
+  return ms.length+' months';
+}
+
+function entryPeriodRangeLabel(){
+  const y = entryCampaignState.year;
+  const months = entrySelectedMonths();
+  if (months.length===12) return y+' · full year';
+  if (entryCampaignState.periodMode==='quarter'){
+    const qs = entryCampaignState.quarters.length ? entryCampaignState.quarters : ['Q1','Q2','Q3','Q4'];
+    return y+' · '+qs.join(', ');
+  }
+  if (months.length<=3) return y+' · '+months.join(', ');
+  return y+' · '+months.length+' months';
+}
+
+function populateEntryYearSelect(){
+  const sel = document.getElementById('entryYearSelect');
+  if (!sel) return;
+  const years = entryCampaignYears();
+  if (!years.includes(entryCampaignState.year)) entryCampaignState.year = years[years.length-1];
+  sel.innerHTML = years.map(y=>`<option value="${y}" ${y===entryCampaignState.year?'selected':''}>${y}</option>`).join('');
+}
+
+function renderEntryPeriodControls(){
+  populateEntryYearSelect();
+  const qMode = entryCampaignState.periodMode==='quarter';
+  document.querySelectorAll('#entryPeriodMode button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.mode===entryCampaignState.periodMode);
+  });
+  const label = document.getElementById('entryPeriodLabel');
+  if (label) label.textContent = qMode ? 'Quarters' : 'Months';
+  const btn = document.getElementById('entryPeriodBtn');
+  if (btn) btn.textContent = entryPeriodBtnLabel();
+}
+
+function renderEntryPeriodPanel(){
+  const panel = document.getElementById('entryPeriodPanel');
+  if (!panel) return;
+  const opts = entryCampaignState.periodMode==='quarter' ? QUARTERS.map(q=>q.key) : MONTHS;
+  const sel = entryCampaignState.periodMode==='quarter' ? entryCampaignState.quarters : entryCampaignState.months;
+  const allSelected = !sel.length || sel.length===opts.length;
+  panel.innerHTML = `
+    <div class="msel-actions">
+      <button type="button" data-act="all">Select all</button>
+      <button type="button" data-act="none">Clear</button>
+    </div>
+    ${opts.map(v=>`
+      <label class="msel-option"><input type="checkbox" value="${v}" ${allSelected || sel.includes(v)?'checked':''}> ${v}</label>
+    `).join('')}
+  `;
+  document.getElementById('entryPeriodBtn').textContent = entryPeriodBtnLabel();
+  panel.querySelector('[data-act="all"]').onclick = (e)=>{
+    e.stopPropagation();
+    if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [];
+    else entryCampaignState.months = [];
+    renderEntryPeriodPanel();
+    renderEntryTree();
+  };
+  panel.querySelector('[data-act="none"]').onclick = (e)=>{
+    e.stopPropagation();
+    if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [QUARTERS[0].key];
+    else entryCampaignState.months = [MONTHS[0]];
+    renderEntryPeriodPanel();
+    renderEntryTree();
+  };
+  panel.querySelectorAll('.msel-option input').forEach(cb=>{
+    cb.onclick = (e)=>{
+      e.stopPropagation();
+      const arr = entryCampaignState.periodMode==='quarter' ? entryCampaignState.quarters : entryCampaignState.months;
+      if (!arr.length){
+        opts.forEach(v=>{ if (v!==cb.value) arr.push(v); });
+        if (!cb.checked){
+          const i = arr.indexOf(cb.value);
+          if (i!==-1) arr.splice(i,1);
+        }
+      } else {
+        const i = arr.indexOf(cb.value);
+        if (cb.checked){ if (i===-1) arr.push(cb.value); }
+        else if (i!==-1) arr.splice(i,1);
+        if (!arr.length){
+          if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [opts[0]];
+          else entryCampaignState.months = [opts[0]];
+        } else if (arr.length===opts.length){
+          if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [];
+          else entryCampaignState.months = [];
+        }
+      }
+      renderEntryPeriodPanel();
+      renderEntryTree();
+    };
+  });
+}
 
 function escapeHtml(s){
   if (s===null || s===undefined) return '';
@@ -1852,11 +2001,10 @@ function setAllCampaigns(raw){
   ALL_CAMPAIGNS = normalizeCampaignsPayload(raw);
 }
 
-// Filter-independent sum across every year of raw campaign months - unlike
-// sumMetric, never honors the Dashboard's Year selector or Asset/Tactic
-// filters (the Data Entry tab always shows everything, unfiltered).
+// Filter-independent of the Dashboard: Data Entry campaign totals use this
+// tab's year + quarterly/monthly period, not the Dashboard Year selector.
 function sumCampaignsRaw(campaigns, metric){
-  return allYearsSum(campaigns, MONTHS, metric);
+  return yearMonthsSum(campaigns, entryCampaignState.year, entrySelectedMonths(), metric);
 }
 
 async function checkBackendReachable(){
@@ -2396,7 +2544,8 @@ function renderEntryTree(){
       entryTreeState.expandedTeams.add(team);
     }
   });
-  document.getElementById('entryCount').textContent = ENTRY_CAMPAIGNS.length + ` campaigns · totals across all years`;
+  renderEntryPeriodControls();
+  document.getElementById('entryCount').textContent = ENTRY_CAMPAIGNS.length + ` campaigns · ${entryPeriodRangeLabel()}`;
   let html = '';
   Object.entries(tree).forEach(([team, subTeams])=>{
     const teamCampaigns = Object.values(subTeams).flat();
@@ -3361,6 +3510,25 @@ document.querySelectorAll('.tab-btn').forEach(b=>{
     if (b.dataset.tab==='data') renderDataTab();
     if (b.dataset.tab==='entry') checkBackendReachable();
   };
+});
+document.getElementById('entryYearSelect').addEventListener('change', e=>{
+  entryCampaignState.year = +e.target.value;
+  renderEntryTree();
+});
+document.getElementById('entryPeriodMode').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=>{
+    entryCampaignState.periodMode = b.dataset.mode;
+    const panel = document.getElementById('entryPeriodPanel');
+    if (panel && panel.classList.contains('open')) renderEntryPeriodPanel();
+    renderEntryTree();
+  };
+});
+document.getElementById('entryPeriodBtn').addEventListener('click', e=>{
+  e.stopPropagation();
+  const panel = document.getElementById('entryPeriodPanel');
+  const opening = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+  if (opening) renderEntryPeriodPanel();
 });
 document.getElementById('dataSearch').addEventListener('input', renderDataTab);
 document.getElementById('dataYearSelect').addEventListener('change', e=>{
