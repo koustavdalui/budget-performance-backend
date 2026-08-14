@@ -286,6 +286,9 @@ tr.row-campaign:hover td{background:var(--page);}
 .data-period .pillgroup button{flex:none;}
 .data-period .msel-option{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:400;text-transform:none;color:var(--text-primary);}
 .data-period .msel-actions{display:flex;justify-content:flex-end;}
+.data-period-msel-row{display:flex;align-items:center;gap:8px;}
+.filter-empty-warn{display:none;font-size:12px;font-weight:650;color:var(--warning);white-space:nowrap;}
+.filter-empty-warn.show{display:inline;}
 .count-note{font-size:12px;color:var(--text-muted);}
 axis-label{font-size:11px;fill:var(--text-muted);}
 svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
@@ -399,10 +402,20 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
             <select id="dataYearSelect"></select>
           </div>
           <div class="data-period">
-            <label>Months</label>
-            <div class="msel" id="dataMonthMsel">
-              <button type="button" class="msel-btn" id="dataMonthBtn">All months</button>
-              <div class="msel-panel" id="dataMonthPanel"></div>
+            <label>Period</label>
+            <div class="pillgroup" id="dataPeriodMode">
+              <button type="button" data-mode="quarter" class="active">Quarterly</button>
+              <button type="button" data-mode="month">Monthly</button>
+            </div>
+          </div>
+          <div class="data-period">
+            <label id="dataPeriodLabel">Quarters</label>
+            <div class="data-period-msel-row">
+              <div class="msel" id="dataPeriodMsel">
+                <button type="button" class="msel-btn" id="dataPeriodBtn">All quarters</button>
+                <div class="msel-panel" id="dataPeriodPanel"></div>
+              </div>
+              <span class="filter-empty-warn" id="dataPeriodWarn">Nothing selected</span>
             </div>
           </div>
         </div>
@@ -472,9 +485,12 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
             </div>
             <div class="data-period">
               <label id="entryPeriodLabel">Quarters</label>
-              <div class="msel" id="entryPeriodMsel">
-                <button type="button" class="msel-btn" id="entryPeriodBtn">All quarters</button>
-                <div class="msel-panel" id="entryPeriodPanel"></div>
+              <div class="data-period-msel-row">
+                <div class="msel" id="entryPeriodMsel">
+                  <button type="button" class="msel-btn" id="entryPeriodBtn">All quarters</button>
+                  <div class="msel-panel" id="entryPeriodPanel"></div>
+                </div>
+                <span class="filter-empty-warn" id="entryPeriodWarn">Nothing selected</span>
               </div>
             </div>
           </div>
@@ -542,6 +558,93 @@ const MONTHS_FULL = {Jan:'January',Feb:'February',Mar:'March',Apr:'April',May:'M
 const QUARTERS = [
   {key:'Q1', from:0, to:2}, {key:'Q2', from:3, to:5}, {key:'Q3', from:6, to:8}, {key:'Q4', from:9, to:11},
 ];
+
+function allQuarterKeys(){ return QUARTERS.map(q=>q.key); }
+function periodOptions(mode){ return mode==='quarter' ? allQuarterKeys() : MONTHS.slice(); }
+function selectedMonthsFromPeriod(state){
+  if (state.periodMode==='quarter'){
+    if (!state.quarters.length) return [];
+    return QUARTERS.filter(q=>state.quarters.includes(q.key)).flatMap(q=>MONTHS.slice(q.from, q.to+1));
+  }
+  return MONTHS.filter(m=> (state.months||[]).includes(m));
+}
+function periodBtnLabel(state){
+  if (state.periodMode==='quarter'){
+    const qs = state.quarters;
+    if (!qs.length) return 'None';
+    if (qs.length===QUARTERS.length) return 'All quarters';
+    return qs.length===1 ? qs[0] : qs.length+' quarters';
+  }
+  const ms = MONTHS.filter(m=> (state.months||[]).includes(m));
+  if (!ms.length) return 'None';
+  if (ms.length===MONTHS.length) return 'All months';
+  if (ms.length<=3) return ms.join(', ');
+  return ms.length+' months';
+}
+function periodRangeLabel(state){
+  const months = selectedMonthsFromPeriod(state);
+  if (!months.length) return state.year+' · nothing selected';
+  if (months.length===12) return state.year+' · full year';
+  if (state.periodMode==='quarter') return state.year+' · '+state.quarters.join(', ');
+  if (months.length<=3) return state.year+' · '+months.join(', ');
+  return state.year+' · '+months.length+' months';
+}
+function setPeriodEmptyWarn(el, state){
+  if (!el) return;
+  el.classList.toggle('show', selectedMonthsFromPeriod(state).length===0);
+}
+function monthMapForYear(c, year){
+  const months = c.months||{};
+  return months[year] || months[String(year)] || {};
+}
+function campaignHasPeriodSpend(c, year, months){
+  if (!months || !months.length) return false;
+  const ym = monthMapForYear(c, year);
+  return months.some(m=>{
+    const v = ym[m];
+    return !!(v && (v.plan!=null || v.forecast!=null || v.commit!=null || v.actual!=null));
+  });
+}
+function campaignsInPeriod(list, state){
+  const months = selectedMonthsFromPeriod(state);
+  return (list||[]).filter(c=> campaignHasPeriodSpend(c, state.year, months));
+}
+function fillPeriodPanel(panel, btn, state, onChange){
+  const opts = periodOptions(state.periodMode);
+  const sel = state.periodMode==='quarter' ? state.quarters : state.months;
+  panel.innerHTML = `
+    <div class="msel-actions">
+      <button type="button" data-act="all">Select all</button>
+      <button type="button" data-act="none">Clear</button>
+    </div>
+    ${opts.map(v=>`
+      <label class="msel-option"><input type="checkbox" value="${v}" ${sel.includes(v)?'checked':''}> ${v}</label>
+    `).join('')}
+  `;
+  if (btn) btn.textContent = periodBtnLabel(state);
+  panel.querySelector('[data-act="all"]').onclick = (e)=>{
+    e.stopPropagation();
+    if (state.periodMode==='quarter') state.quarters = allQuarterKeys();
+    else state.months = MONTHS.slice();
+    onChange();
+  };
+  panel.querySelector('[data-act="none"]').onclick = (e)=>{
+    e.stopPropagation();
+    if (state.periodMode==='quarter') state.quarters = [];
+    else state.months = [];
+    onChange();
+  };
+  panel.querySelectorAll('.msel-option input').forEach(cb=>{
+    cb.onclick = (e)=>{
+      e.stopPropagation();
+      const arr = state.periodMode==='quarter' ? state.quarters : state.months;
+      const i = arr.indexOf(cb.value);
+      if (cb.checked){ if (i===-1) arr.push(cb.value); }
+      else if (i!==-1) arr.splice(i,1);
+      onChange();
+    };
+  });
+}
 
 const fmtMoney = (v, compact=true) => {
   if (v===null || v===undefined || isNaN(v)) return '—';
@@ -985,10 +1088,10 @@ document.addEventListener('click', e=>{
     state.openFilterPanel = null;
     renderFilters();
   }
-  const monthMsel = document.getElementById('dataMonthMsel');
-  const monthPanel = document.getElementById('dataMonthPanel');
-  if (monthPanel && monthPanel.classList.contains('open') && monthMsel && !monthMsel.contains(e.target)){
-    monthPanel.classList.remove('open');
+  const dataMsel = document.getElementById('dataPeriodMsel');
+  const dataPanel = document.getElementById('dataPeriodPanel');
+  if (dataPanel && dataPanel.classList.contains('open') && dataMsel && !dataMsel.contains(e.target)){
+    dataPanel.classList.remove('open');
   }
   const entryMsel = document.getElementById('entryPeriodMsel');
   const entryPanel = document.getElementById('entryPeriodPanel');
@@ -1603,7 +1706,12 @@ function renderTopCampaigns(campaigns, months){
 const dataTreeState = { expandedTeams: new Set(), expandedSubTeams: new Set() };
 // Own year/month filters, independent of the Dashboard. The campaign popup
 // still shows every year and month the campaign has, regardless of these.
-const dataTabState = { year: defaultDashboardYear(), months: MONTHS.slice() };
+const dataTabState = {
+  year: defaultDashboardYear(),
+  periodMode: 'quarter',
+  quarters: allQuarterKeys(),
+  months: MONTHS.slice(),
+};
 // Teams start expanded, sub teams start collapsed - "click to reveal" like the source tool.
 ALL_CAMPAIGNS.forEach(c=> dataTreeState.expandedTeams.add(c.team));
 
@@ -1616,25 +1724,16 @@ function buildTeamTree(campaigns){
   return tree;
 }
 
-// Columns are one selected year, then only the months checked in the Data
-// tab filter — so the table stays scrollable instead of laying every year
-// side by side. Empty month selection means all 12.
+// Columns are one selected year, then only the months implied by this tab's
+// quarterly/monthly filter. An empty selection means no values (not "all").
 function dataSelectedMonths(){
-  const ordered = MONTHS.filter(m=> (dataTabState.months||[]).includes(m));
-  return ordered.length ? ordered : MONTHS.slice();
+  return selectedMonthsFromPeriod(dataTabState);
 }
 function dataYearBlocks(){
   const years = campaignYears();
   const y = years.includes(dataTabState.year) ? dataTabState.year : (years.length ? years[years.length-1] : new Date().getFullYear());
   dataTabState.year = y;
   return [y];
-}
-
-function dataMonthBtnLabel(){
-  const sel = dataSelectedMonths();
-  if (sel.length===MONTHS.length) return 'All months';
-  if (sel.length<=3) return sel.join(', ');
-  return sel.length+' months';
 }
 
 function populateDataYearSelect(){
@@ -1646,35 +1745,26 @@ function populateDataYearSelect(){
   sel.innerHTML = list.map(y=>`<option value="${y}" ${y===dataTabState.year?'selected':''}>${y}</option>`).join('');
 }
 
-function renderDataMonthPanel(){
-  const panel = document.getElementById('dataMonthPanel');
-  panel.innerHTML = `
-    <div class="msel-actions">
-      <button type="button" data-act="all">Select all</button>
-    </div>
-    ${MONTHS.map(m=>`
-      <label class="msel-option"><input type="checkbox" value="${m}" ${(dataTabState.months||[]).includes(m)?'checked':''}> ${m}</label>
-    `).join('')}
-  `;
-  document.getElementById('dataMonthBtn').textContent = dataMonthBtnLabel();
-  panel.querySelector('[data-act="all"]').onclick = (e)=>{
-    e.stopPropagation();
-    dataTabState.months = MONTHS.slice();
-    renderDataMonthPanel();
-    renderDataTab();
-  };
-  panel.querySelectorAll('.msel-option input').forEach(cb=>{
-    cb.onclick = (e)=>{
-      e.stopPropagation();
-      const arr = dataTabState.months;
-      const i = arr.indexOf(cb.value);
-      if (cb.checked){ if (i===-1) arr.push(cb.value); }
-      else if (i!==-1) arr.splice(i,1);
-      if (!arr.length) dataTabState.months = MONTHS.slice();
-      renderDataMonthPanel();
-      renderDataTab();
-    };
+function renderDataPeriodControls(){
+  populateDataYearSelect();
+  document.querySelectorAll('#dataPeriodMode button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.mode===dataTabState.periodMode);
   });
+  const label = document.getElementById('dataPeriodLabel');
+  if (label) label.textContent = dataTabState.periodMode==='quarter' ? 'Quarters' : 'Months';
+  const btn = document.getElementById('dataPeriodBtn');
+  if (btn) btn.textContent = periodBtnLabel(dataTabState);
+  setPeriodEmptyWarn(document.getElementById('dataPeriodWarn'), dataTabState);
+}
+
+function renderDataPeriodPanel(){
+  const panel = document.getElementById('dataPeriodPanel');
+  if (!panel) return;
+  fillPeriodPanel(panel, document.getElementById('dataPeriodBtn'), dataTabState, ()=>{
+    renderDataPeriodPanel();
+    renderDataTab();
+  });
+  setPeriodEmptyWarn(document.getElementById('dataPeriodWarn'), dataTabState);
 }
 
 function renderDataThead(){
@@ -1687,6 +1777,12 @@ function renderDataThead(){
   const monthRow = [];
   const metricRow = [];
   years.forEach(y=>{
+    if (!months.length){
+      yearRow.push(`<th class="month-group-th year-group-th" colspan="1"><span>${y}</span></th>`);
+      monthRow.push('<th class="month-group-th">—</th>');
+      metricRow.push('<th></th>');
+      return;
+    }
     yearRow.push(`<th class="month-group-th year-group-th" colspan="${months.length*3}"><span>${y}</span></th>`);
     months.forEach(m=>{
       monthRow.push(`<th class="month-group-th" colspan="3">${m}</th>`);
@@ -1699,14 +1795,20 @@ function renderDataThead(){
 }
 
 function dataRowColspan(){
-  return 7 + dataYearBlocks().length*dataSelectedMonths().length*3 + 1;
+  const months = dataSelectedMonths();
+  const valueCols = months.length ? months.length*3 : 1;
+  return 7 + dataYearBlocks().length*valueCols + 1;
 }
 
 function campaignRowHTML(c){
-  const cells = dataYearBlocks().map(y=> dataSelectedMonths().map(m=>{
-    const v = (c.months[y]||{})[m];
-    return `<td>${fmtMoney(v?v.plan:null,false)}</td><td>${fmtMoney(v?v.forecast:null,false)}</td><td>${fmtMoney(v?v.commit:null,false)}</td>`;
-  }).join('')).join('');
+  const months = dataSelectedMonths();
+  const cells = dataYearBlocks().map(y=>{
+    if (!months.length) return '<td>—</td>';
+    return months.map(m=>{
+      const v = (c.months[y]||{})[m];
+      return `<td>${fmtMoney(v?v.plan:null,false)}</td><td>${fmtMoney(v?v.forecast:null,false)}</td><td>${fmtMoney(v?v.commit:null,false)}</td>`;
+    }).join('');
+  }).join('');
   const tacticTags = [...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))];
   return `<tr class="row-campaign clickable" data-role="campaign">
     <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle"></span><span class="hier-name" title="${c.campaign}">${c.campaign}</span></div></td>
@@ -1732,12 +1834,16 @@ function yearMonthsSum(campaigns, year, months, metric){
 }
 
 function aggregateRowHTML(label, campaigns, level, expanded, key){
-  const cells = dataYearBlocks().map(y=> dataSelectedMonths().map(m=>{
-    const plan = yearMonthsSum(campaigns, y, [m], 'plan');
-    const forecast = yearMonthsSum(campaigns, y, [m], 'forecast');
-    const commit = yearMonthsSum(campaigns, y, [m], 'commit');
-    return `<td>${fmtMoney(plan,false)}</td><td>${fmtMoney(forecast,false)}</td><td>${fmtMoney(commit,false)}</td>`;
-  }).join('')).join('');
+  const months = dataSelectedMonths();
+  const cells = dataYearBlocks().map(y=>{
+    if (!months.length) return '<td>—</td>';
+    return months.map(m=>{
+      const plan = yearMonthsSum(campaigns, y, [m], 'plan');
+      const forecast = yearMonthsSum(campaigns, y, [m], 'forecast');
+      const commit = yearMonthsSum(campaigns, y, [m], 'commit');
+      return `<td>${fmtMoney(plan,false)}</td><td>${fmtMoney(forecast,false)}</td><td>${fmtMoney(commit,false)}</td>`;
+    }).join('');
+  }).join('');
   const cls = level===0 ? 'row-team' : 'row-subteam';
   return `<tr class="${cls}" data-role="${cls}" data-key="${key}">
     <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle">${expanded?'▾':'▸'}</span><span class="hier-name">${label}</span></div></td>
@@ -1750,23 +1856,23 @@ function aggregateRowHTML(label, campaigns, level, expanded, key){
 }
 
 function renderDataTab(){
-  populateDataYearSelect();
-  document.getElementById('dataMonthBtn').textContent = dataMonthBtnLabel();
+  renderDataPeriodControls();
   renderDataThead();
   const search = (document.getElementById('dataSearch').value||'').trim().toLowerCase();
   const el = document.getElementById('dataTbody');
+  const inPeriod = campaignsInPeriod(ALL_CAMPAIGNS, dataTabState);
 
   if (search){
     // Flat, filtered results - hierarchy doesn't help you find something you're already searching for.
-    const rows = ALL_CAMPAIGNS.filter(c=> c.campaign.toLowerCase().includes(search));
-    document.getElementById('dataCount').textContent = rows.length + ' matching campaigns';
-    el.innerHTML = rows.map(campaignRowHTML).join('') || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns match that search</td></tr>`;
+    const rows = inPeriod.filter(c=> c.campaign.toLowerCase().includes(search));
+    document.getElementById('dataCount').textContent = rows.length + ' matching campaigns · '+periodRangeLabel(dataTabState);
+    el.innerHTML = rows.map(campaignRowHTML).join('') || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns match that search in this period</td></tr>`;
     el.querySelectorAll('tr.row-campaign').forEach((tr,i)=>{ tr.onclick = ()=> openCampaignModal(rows[i]); });
     return;
   }
 
-  const tree = buildTeamTree();
-  document.getElementById('dataCount').textContent = ALL_CAMPAIGNS.length + ' campaigns';
+  const tree = buildTeamTree(inPeriod);
+  document.getElementById('dataCount').textContent = inPeriod.length + ' campaigns · '+periodRangeLabel(dataTabState);
   let html = '';
   const campaignRefs = [];
 
@@ -1783,7 +1889,7 @@ function renderDataTab(){
       campaigns.forEach(c=>{ campaignRefs.push(c); html += campaignRowHTML(c); });
     });
   });
-  el.innerHTML = html;
+  el.innerHTML = html || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns in this period</td></tr>`;
 
   el.querySelectorAll('tr.row-team, tr.row-subteam').forEach(tr=>{
     tr.onclick = ()=>{
@@ -1801,7 +1907,7 @@ function renderDataTab(){
 }
 
 document.getElementById('expandAllBtn').onclick = ()=>{
-  const tree = buildTeamTree();
+  const tree = buildTeamTree(campaignsInPeriod(ALL_CAMPAIGNS, dataTabState));
   Object.entries(tree).forEach(([team, subTeams])=>{
     dataTreeState.expandedTeams.add(team);
     Object.keys(subTeams).forEach(st=> dataTreeState.expandedSubTeams.add(team+'|'+st));
@@ -1870,8 +1976,13 @@ const TACTIC_TAXONOMY = ['AE Emails','Agency Retainer','Chat','Content Syndicati
   'Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing'];
 const entryTreeState = { expandedTeams: new Set(), expandedSubTeams: new Set(), seenTeams: new Set() };
 // Own year / quarter / month filters for Data Entry campaign totals — independent
-// of the Dashboard and of the Data tab. Empty quarter/month lists mean "all".
-const entryCampaignState = { year: defaultDashboardYear(), periodMode: 'quarter', quarters: [], months: [] };
+// of the Dashboard. Empty quarter/month lists mean nothing selected (no $).
+const entryCampaignState = {
+  year: defaultDashboardYear(),
+  periodMode: 'quarter',
+  quarters: allQuarterKeys(),
+  months: MONTHS.slice(),
+};
 
 function entryCampaignYears(){
   const set = new Set(campaignYears());
@@ -1882,36 +1993,7 @@ function entryCampaignYears(){
 }
 
 function entrySelectedMonths(){
-  if (entryCampaignState.periodMode==='quarter'){
-    const qs = entryCampaignState.quarters.length ? entryCampaignState.quarters : QUARTERS.map(q=>q.key);
-    return QUARTERS.filter(q=>qs.includes(q.key)).flatMap(q=>MONTHS.slice(q.from, q.to+1));
-  }
-  const picked = entryCampaignState.months;
-  return picked.length ? MONTHS.filter(m=>picked.includes(m)) : MONTHS.slice();
-}
-
-function entryPeriodBtnLabel(){
-  if (entryCampaignState.periodMode==='quarter'){
-    const qs = entryCampaignState.quarters;
-    if (!qs.length || qs.length===4) return 'All quarters';
-    return qs.length===1 ? qs[0] : qs.length+' quarters';
-  }
-  const ms = entryCampaignState.months;
-  if (!ms.length || ms.length===MONTHS.length) return 'All months';
-  if (ms.length<=3) return MONTHS.filter(m=>ms.includes(m)).join(', ');
-  return ms.length+' months';
-}
-
-function entryPeriodRangeLabel(){
-  const y = entryCampaignState.year;
-  const months = entrySelectedMonths();
-  if (months.length===12) return y+' · full year';
-  if (entryCampaignState.periodMode==='quarter'){
-    const qs = entryCampaignState.quarters.length ? entryCampaignState.quarters : ['Q1','Q2','Q3','Q4'];
-    return y+' · '+qs.join(', ');
-  }
-  if (months.length<=3) return y+' · '+months.join(', ');
-  return y+' · '+months.length+' months';
+  return selectedMonthsFromPeriod(entryCampaignState);
 }
 
 function populateEntryYearSelect(){
@@ -1924,72 +2006,24 @@ function populateEntryYearSelect(){
 
 function renderEntryPeriodControls(){
   populateEntryYearSelect();
-  const qMode = entryCampaignState.periodMode==='quarter';
   document.querySelectorAll('#entryPeriodMode button').forEach(b=>{
     b.classList.toggle('active', b.dataset.mode===entryCampaignState.periodMode);
   });
   const label = document.getElementById('entryPeriodLabel');
-  if (label) label.textContent = qMode ? 'Quarters' : 'Months';
+  if (label) label.textContent = entryCampaignState.periodMode==='quarter' ? 'Quarters' : 'Months';
   const btn = document.getElementById('entryPeriodBtn');
-  if (btn) btn.textContent = entryPeriodBtnLabel();
+  if (btn) btn.textContent = periodBtnLabel(entryCampaignState);
+  setPeriodEmptyWarn(document.getElementById('entryPeriodWarn'), entryCampaignState);
 }
 
 function renderEntryPeriodPanel(){
   const panel = document.getElementById('entryPeriodPanel');
   if (!panel) return;
-  const opts = entryCampaignState.periodMode==='quarter' ? QUARTERS.map(q=>q.key) : MONTHS;
-  const sel = entryCampaignState.periodMode==='quarter' ? entryCampaignState.quarters : entryCampaignState.months;
-  const allSelected = !sel.length || sel.length===opts.length;
-  panel.innerHTML = `
-    <div class="msel-actions">
-      <button type="button" data-act="all">Select all</button>
-      <button type="button" data-act="none">Clear</button>
-    </div>
-    ${opts.map(v=>`
-      <label class="msel-option"><input type="checkbox" value="${v}" ${allSelected || sel.includes(v)?'checked':''}> ${v}</label>
-    `).join('')}
-  `;
-  document.getElementById('entryPeriodBtn').textContent = entryPeriodBtnLabel();
-  panel.querySelector('[data-act="all"]').onclick = (e)=>{
-    e.stopPropagation();
-    if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [];
-    else entryCampaignState.months = [];
+  fillPeriodPanel(panel, document.getElementById('entryPeriodBtn'), entryCampaignState, ()=>{
     renderEntryPeriodPanel();
     renderEntryTree();
-  };
-  panel.querySelector('[data-act="none"]').onclick = (e)=>{
-    e.stopPropagation();
-    if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [QUARTERS[0].key];
-    else entryCampaignState.months = [MONTHS[0]];
-    renderEntryPeriodPanel();
-    renderEntryTree();
-  };
-  panel.querySelectorAll('.msel-option input').forEach(cb=>{
-    cb.onclick = (e)=>{
-      e.stopPropagation();
-      const arr = entryCampaignState.periodMode==='quarter' ? entryCampaignState.quarters : entryCampaignState.months;
-      if (!arr.length){
-        opts.forEach(v=>{ if (v!==cb.value) arr.push(v); });
-        if (!cb.checked){
-          const i = arr.indexOf(cb.value);
-          if (i!==-1) arr.splice(i,1);
-        }
-      } else {
-        const i = arr.indexOf(cb.value);
-        if (cb.checked){ if (i===-1) arr.push(cb.value); }
-        else if (i!==-1) arr.splice(i,1);
-        if (!arr.length){
-          if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [opts[0]];
-          else entryCampaignState.months = [opts[0]];
-        } else if (arr.length===opts.length){
-          if (entryCampaignState.periodMode==='quarter') entryCampaignState.quarters = [];
-          else entryCampaignState.months = [];
-        }
-      }
-      renderEntryPeriodPanel();
-      renderEntryTree();
-    };
   });
+  setPeriodEmptyWarn(document.getElementById('entryPeriodWarn'), entryCampaignState);
 }
 
 function escapeHtml(s){
@@ -2535,7 +2569,8 @@ function entryRowHTML_campaign(c){
 }
 
 function renderEntryTree(){
-  const tree = buildTeamTree(ENTRY_CAMPAIGNS);
+  const inPeriod = campaignsInPeriod(ENTRY_CAMPAIGNS, entryCampaignState);
+  const tree = buildTeamTree(inPeriod);
   // A team starts expanded the first time it's seen, like the Data tab - but
   // only once, so a user's manual collapse survives later re-renders/refreshes.
   Object.keys(tree).forEach(team=>{
@@ -2545,7 +2580,7 @@ function renderEntryTree(){
     }
   });
   renderEntryPeriodControls();
-  document.getElementById('entryCount').textContent = ENTRY_CAMPAIGNS.length + ` campaigns · ${entryPeriodRangeLabel()}`;
+  document.getElementById('entryCount').textContent = inPeriod.length + ` campaigns · ${periodRangeLabel(entryCampaignState)}`;
   let html = '';
   Object.entries(tree).forEach(([team, subTeams])=>{
     const teamCampaigns = Object.values(subTeams).flat();
@@ -2560,7 +2595,7 @@ function renderEntryTree(){
       campaigns.forEach(c=>{ html += entryRowHTML_campaign(c); });
     });
   });
-  document.getElementById('entryTbody').innerHTML = html || `<tr><td colspan="9" class="empty-note">No campaigns yet - use + Add campaign or Bulk import.</td></tr>`;
+  document.getElementById('entryTbody').innerHTML = html || `<tr><td colspan="9" class="empty-note">${ENTRY_CAMPAIGNS.length ? 'No campaigns in this period' : 'No campaigns yet - use + Add campaign or Bulk import.'}</td></tr>`;
 
   document.querySelectorAll('#entryTbody tr.row-team, #entryTbody tr.row-subteam').forEach(tr=>{
     tr.onclick = ()=>{
@@ -3535,12 +3570,20 @@ document.getElementById('dataYearSelect').addEventListener('change', e=>{
   dataTabState.year = +e.target.value;
   renderDataTab();
 });
-document.getElementById('dataMonthBtn').addEventListener('click', e=>{
+document.getElementById('dataPeriodMode').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=>{
+    dataTabState.periodMode = b.dataset.mode;
+    const panel = document.getElementById('dataPeriodPanel');
+    if (panel && panel.classList.contains('open')) renderDataPeriodPanel();
+    renderDataTab();
+  };
+});
+document.getElementById('dataPeriodBtn').addEventListener('click', e=>{
   e.stopPropagation();
-  const panel = document.getElementById('dataMonthPanel');
+  const panel = document.getElementById('dataPeriodPanel');
   const opening = !panel.classList.contains('open');
   panel.classList.toggle('open');
-  if (opening) renderDataMonthPanel();
+  if (opening) renderDataPeriodPanel();
 });
 
 // Dashboard/Data always prefer live backend data over the embedded
