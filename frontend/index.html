@@ -593,6 +593,22 @@ function setPeriodEmptyWarn(el, state){
   if (!el) return;
   el.classList.toggle('show', selectedMonthsFromPeriod(state).length===0);
 }
+function monthMapForYear(c, year){
+  const months = c.months||{};
+  return months[year] || months[String(year)] || {};
+}
+function campaignHasPeriodSpend(c, year, months){
+  if (!months || !months.length) return false;
+  const ym = monthMapForYear(c, year);
+  return months.some(m=>{
+    const v = ym[m];
+    return !!(v && (v.plan!=null || v.forecast!=null || v.commit!=null || v.actual!=null));
+  });
+}
+function campaignsInPeriod(list, state){
+  const months = selectedMonthsFromPeriod(state);
+  return (list||[]).filter(c=> campaignHasPeriodSpend(c, state.year, months));
+}
 function fillPeriodPanel(panel, btn, state, onChange){
   const opts = periodOptions(state.periodMode);
   const sel = state.periodMode==='quarter' ? state.quarters : state.months;
@@ -1844,18 +1860,19 @@ function renderDataTab(){
   renderDataThead();
   const search = (document.getElementById('dataSearch').value||'').trim().toLowerCase();
   const el = document.getElementById('dataTbody');
+  const inPeriod = campaignsInPeriod(ALL_CAMPAIGNS, dataTabState);
 
   if (search){
     // Flat, filtered results - hierarchy doesn't help you find something you're already searching for.
-    const rows = ALL_CAMPAIGNS.filter(c=> c.campaign.toLowerCase().includes(search));
+    const rows = inPeriod.filter(c=> c.campaign.toLowerCase().includes(search));
     document.getElementById('dataCount').textContent = rows.length + ' matching campaigns · '+periodRangeLabel(dataTabState);
-    el.innerHTML = rows.map(campaignRowHTML).join('') || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns match that search</td></tr>`;
+    el.innerHTML = rows.map(campaignRowHTML).join('') || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns match that search in this period</td></tr>`;
     el.querySelectorAll('tr.row-campaign').forEach((tr,i)=>{ tr.onclick = ()=> openCampaignModal(rows[i]); });
     return;
   }
 
-  const tree = buildTeamTree();
-  document.getElementById('dataCount').textContent = ALL_CAMPAIGNS.length + ' campaigns · '+periodRangeLabel(dataTabState);
+  const tree = buildTeamTree(inPeriod);
+  document.getElementById('dataCount').textContent = inPeriod.length + ' campaigns · '+periodRangeLabel(dataTabState);
   let html = '';
   const campaignRefs = [];
 
@@ -1872,7 +1889,7 @@ function renderDataTab(){
       campaigns.forEach(c=>{ campaignRefs.push(c); html += campaignRowHTML(c); });
     });
   });
-  el.innerHTML = html;
+  el.innerHTML = html || `<tr><td colspan="${dataRowColspan()}" class="empty-note">No campaigns in this period</td></tr>`;
 
   el.querySelectorAll('tr.row-team, tr.row-subteam').forEach(tr=>{
     tr.onclick = ()=>{
@@ -1890,7 +1907,7 @@ function renderDataTab(){
 }
 
 document.getElementById('expandAllBtn').onclick = ()=>{
-  const tree = buildTeamTree();
+  const tree = buildTeamTree(campaignsInPeriod(ALL_CAMPAIGNS, dataTabState));
   Object.entries(tree).forEach(([team, subTeams])=>{
     dataTreeState.expandedTeams.add(team);
     Object.keys(subTeams).forEach(st=> dataTreeState.expandedSubTeams.add(team+'|'+st));
@@ -2552,7 +2569,8 @@ function entryRowHTML_campaign(c){
 }
 
 function renderEntryTree(){
-  const tree = buildTeamTree(ENTRY_CAMPAIGNS);
+  const inPeriod = campaignsInPeriod(ENTRY_CAMPAIGNS, entryCampaignState);
+  const tree = buildTeamTree(inPeriod);
   // A team starts expanded the first time it's seen, like the Data tab - but
   // only once, so a user's manual collapse survives later re-renders/refreshes.
   Object.keys(tree).forEach(team=>{
@@ -2562,7 +2580,7 @@ function renderEntryTree(){
     }
   });
   renderEntryPeriodControls();
-  document.getElementById('entryCount').textContent = ENTRY_CAMPAIGNS.length + ` campaigns · ${periodRangeLabel(entryCampaignState)}`;
+  document.getElementById('entryCount').textContent = inPeriod.length + ` campaigns · ${periodRangeLabel(entryCampaignState)}`;
   let html = '';
   Object.entries(tree).forEach(([team, subTeams])=>{
     const teamCampaigns = Object.values(subTeams).flat();
@@ -2577,7 +2595,7 @@ function renderEntryTree(){
       campaigns.forEach(c=>{ html += entryRowHTML_campaign(c); });
     });
   });
-  document.getElementById('entryTbody').innerHTML = html || `<tr><td colspan="9" class="empty-note">No campaigns yet - use + Add campaign or Bulk import.</td></tr>`;
+  document.getElementById('entryTbody').innerHTML = html || `<tr><td colspan="9" class="empty-note">${ENTRY_CAMPAIGNS.length ? 'No campaigns in this period' : 'No campaigns yet - use + Add campaign or Bulk import.'}</td></tr>`;
 
   document.querySelectorAll('#entryTbody tr.row-team, #entryTbody tr.row-subteam').forEach(tr=>{
     tr.onclick = ()=>{
