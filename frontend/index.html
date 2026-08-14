@@ -3239,10 +3239,11 @@ function openImportModal(){
   document.getElementById('importContent').innerHTML = `
     <div class="modal-title">Bulk Import</div>
     <div class="modal-meta" style="margin-bottom:12px;">
-      Download the Excel template, then in Google Drive choose <b>Open with Google Sheets</b>
-      (or File → Open in Sheets). Keep the <b>DropdownLists</b> sheet — that is what the arrows use.
-      SubCampaignType and LineName show the full lists; import still rejects a subtype that does not
-      match CampaignType, or a LineName that does not match Type (Asset vs Tactic).
+      Download the Excel template and open it in <b>Excel on your computer</b> — dropdown arrows are on
+      Action, Type, CampaignType, SubCampaignType, and LineName. Google Sheets strips those Excel
+      dropdowns when you convert the file; in Sheets use Data → Data validation and point each column
+      at the matching range on the <b>DropdownLists</b> sheet (or fill from that sheet). Import still
+      rejects a subtype that does not match CampaignType, or a LineName that does not match Type.
       One <b>Campaign</b>-type row per campaign (metadata), followed by any number of
       <b>Asset</b>/<b>Tactic</b>-type rows carrying that line's monthly Plan/Forecast/Commit/Actual $
       &mdash; one row per year a line has data in. Rows link by <b>Campaign</b> name, not position.

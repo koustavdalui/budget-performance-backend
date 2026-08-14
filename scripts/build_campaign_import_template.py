@@ -222,7 +222,7 @@ def main():
     notes['A1'].font = Font(bold=True, size=14)
     notes.merge_cells('A3:A16')
     notes['A3'] = (
-        'Works in Google Sheets: File → Open, or upload to Drive and Open with Google Sheets. Keep the DropdownLists sheet.\n'
+        'Open this file in Excel on your computer. Dropdown arrows work there. Google Sheets removes Excel dropdowns on convert — in Sheets, Data → Data validation, list from the DropdownLists sheet.\n'
         '\n'
         '1. Keep the Import sheet headers as they are.\n'
         '2. One Type=Campaign row per campaign (Team, Campaign, CampaignType, SubCampaignType, …).\n'
@@ -231,8 +231,8 @@ def main():
         '5. LineName must be an Asset name when Type=Asset, or a Tactic name when Type=Tactic.\n'
         '6. Leave LineName blank on Campaign rows.\n'
         '7. Delete the example rows before importing real data.\n'
-        '8. Download as Excel (.xlsx) or CSV from Sheets, then upload in Data Entry → Bulk import.\n'
-        '9. Do not delete the DropdownLists sheet — the dropdowns read from it.\n'
+        '8. Upload this .xlsx, or a CSV/xlsx export from Sheets, in Data Entry → Bulk import.\n'
+        '9. Do not delete the DropdownLists sheet — Excel dropdowns read from it.\n'
         '10. Values are saved as the same text fields as the campaign form.'
     )
     notes['A3'].alignment = Alignment(wrap_text=True, vertical='top')
