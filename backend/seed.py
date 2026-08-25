@@ -27,9 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'api'))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from models import (
-    AssetLine, AssetLineMonth, Base, Campaign, CampaignProduct, TacticLine, TacticLineMonth, TeamBudget, TeamSubteam,
-)
+from models import Base, Campaign, SpendLine, SpendLineMonth, Team, TeamBudget
 
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://budget:budget@localhost:5432/budget')
 DATA_FILE = Path(__file__).parent.parent / 'scripts' / 'budget_data.json'
@@ -57,7 +55,7 @@ def parse_date(s):
 def build_lines(campaign_data):
     """Returns (asset_lines, tactic_lines) - each a list of {asset|tactic: name,
     months: {year: {month: {...}}}}. Assets and tactics are independent
-    expense buckets, additive for the campaign total (see AssetLine's
+    expense buckets, additive for the campaign total (see SpendLine's
     docstring in models.py) - never merge one asset with one tactic onto a
     single line. Accepts three shapes:
       - already-split (assetLines + tacticLines present, no spendLines): a
@@ -135,13 +133,13 @@ def build_campaign(team, data):
         end_date=parse_date(data.get('endDate')),
         conv_rate=data.get('convRate'),
     )
-    c.products = [CampaignProduct(product=p) for p in data.get('products', [])]
+    c.products = list(data.get('products', []))
     asset_lines_data, tactic_lines_data = build_lines(data)
-    c.asset_lines = [
-        AssetLine(
-            asset_name=al['asset'],
+    c.spend_lines = [
+        SpendLine(
+            line_type='asset', line_name=al['asset'],
             months=[
-                AssetLineMonth(
+                SpendLineMonth(
                     year=year, month=m,
                     plan=v.get('plan'), forecast=v.get('forecast'), commit=v.get('commit'), actual=v.get('actual'),
                 )
@@ -150,12 +148,11 @@ def build_campaign(team, data):
             ],
         )
         for al in asset_lines_data
-    ]
-    c.tactic_lines = [
-        TacticLine(
-            tactic_name=tl['tactic'],
+    ] + [
+        SpendLine(
+            line_type='tactic', line_name=tl['tactic'],
             months=[
-                TacticLineMonth(
+                SpendLineMonth(
                     year=year, month=m,
                     plan=v.get('plan'), forecast=v.get('forecast'), commit=v.get('commit'), actual=v.get('actual'),
                 )
@@ -246,15 +243,24 @@ def main():
                 per_quarter = (row['amount'] / 4) if row['amount'] is not None else None
                 for q in ('Q1', 'Q2', 'Q3', 'Q4'):
                     budget_amounts[(row['team'], row['year'], q)] = per_quarter
+    # teams.name is the registry (team_budgets.team FKs to it) - every team
+    # referenced by a campaign, a budget, or a sub-team pair needs a row here
+    # before any TeamBudget row can be inserted.
+    subteams_by_team = {}
+    for team_name, sub_team in team_subteams:
+        subteams_by_team.setdefault(team_name, []).append(sub_team)
+    all_team_names = teams_seen | set(subteams_by_team.keys()) | {t for t, _, _ in budget_amounts}
+    for team_name in all_team_names:
+        if not session.get(Team, team_name):
+            session.add(Team(name=team_name, sub_teams=sorted(subteams_by_team.get(team_name, []))))
+    session.flush()
+
     for team_name in teams_seen:
         budget_amounts.setdefault((team_name, DEFAULT_YEAR, 'Q1'), None)  # ensure at least a registration row
 
     for (team_name, year, quarter), amount in budget_amounts.items():
         if not session.get(TeamBudget, (team_name, year, quarter)):
             session.add(TeamBudget(team=team_name, year=year, quarter=quarter, amount=amount))
-    for team_name, sub_team in team_subteams:
-        if not session.get(TeamSubteam, (team_name, sub_team)):
-            session.add(TeamSubteam(team=team_name, sub_team=sub_team))
 
     session.commit()
     print(f'Seeded {count} campaigns, {len(team_subteams)} team/sub-team pair(s), '

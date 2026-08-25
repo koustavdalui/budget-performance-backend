@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, Date, DateTime, ForeignKey, func
+from sqlalchemy import CheckConstraint, Column, Integer, String, Text, Numeric, Date, DateTime, ForeignKey, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -12,10 +13,14 @@ class Campaign(Base):
     id = Column(Integer, primary_key=True)
     campaign_name = Column(String, nullable=False)
     source_campaign_id = Column(String)  # the original Salesforce-style Campaign ID from the sheet
-    team = Column(String, nullable=False)  # any team registered in team_budgets - not limited to the original two
+    team = Column(String, nullable=False)  # any team registered in `teams` - not limited to the original two
     sub_team = Column(String)
     region = Column(String)
     product = Column(String)  # raw combined string e.g. "EOR, AOR, Global Payroll" - kept for display
+    # Physical column is `product_tags`, not `products` - the original
+    # `products` column is a leftover JSONB column from a previous, reverted
+    # consolidation attempt, left in place (unused) rather than dropped.
+    products = Column('product_tags', ARRAY(String), nullable=False, default=list)
     asset = Column(String)  # GM's single asset tag; null for FM
     campaign_type = Column(String)
     sub_campaign_type = Column(String)
@@ -29,35 +34,35 @@ class Campaign(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    products = relationship('CampaignProduct', cascade='all, delete-orphan', backref='campaign')
-    asset_lines = relationship('AssetLine', cascade='all, delete-orphan', backref='campaign')
-    tactic_lines = relationship('TacticLine', cascade='all, delete-orphan', backref='campaign')
+    spend_lines = relationship('SpendLine', cascade='all, delete-orphan', backref='campaign')
 
 
-class CampaignProduct(Base):
-    __tablename__ = 'campaign_products'
-
-    campaign_id = Column(Integer, ForeignKey('campaigns.id', ondelete='CASCADE'), primary_key=True)
-    product = Column(String, primary_key=True)
-
-
-class AssetLine(Base):
-    """One row per asset-tagged spend line on a campaign. Independent from
-    tactic lines - a campaign's total is sum(asset lines) + sum(tactic
-    lines), additive expense buckets, not two views of the same money."""
-    __tablename__ = 'asset_lines'
+class SpendLine(Base):
+    """One row per spend line (asset OR tactic) on a campaign - replaces the
+    old asset_lines/tactic_lines table pair. `line_type` tells them apart;
+    they stay independent, additive expense buckets (a campaign's total is
+    sum(asset lines) + sum(tactic lines), not one or the other) - merging
+    them into one table with a discriminator column doesn't change that
+    meaning, it just avoids two near-identical tables. Real $ lives in the
+    child `spend_line_months` table, one real numeric column per metric -
+    never a JSON blob."""
+    __tablename__ = 'spend_lines'
+    __table_args__ = (
+        CheckConstraint("line_type IN ('asset', 'tactic')", name='ck_spend_lines_line_type'),
+    )
 
     id = Column(Integer, primary_key=True)
     campaign_id = Column(Integer, ForeignKey('campaigns.id', ondelete='CASCADE'), nullable=False)
-    asset_name = Column(String, nullable=False)
+    line_type = Column(String, nullable=False)  # 'asset' or 'tactic'
+    line_name = Column(String, nullable=False)
 
-    months = relationship('AssetLineMonth', cascade='all, delete-orphan', backref='asset_line')
+    months = relationship('SpendLineMonth', cascade='all, delete-orphan', backref='spend_line')
 
 
-class AssetLineMonth(Base):
-    __tablename__ = 'asset_line_months'
+class SpendLineMonth(Base):
+    __tablename__ = 'spend_line_months'
 
-    asset_line_id = Column(Integer, ForeignKey('asset_lines.id', ondelete='CASCADE'), primary_key=True)
+    spend_line_id = Column(Integer, ForeignKey('spend_lines.id', ondelete='CASCADE'), primary_key=True)
     year = Column(Integer, primary_key=True)
     month = Column(String, primary_key=True)
     plan = Column(Numeric)
@@ -66,43 +71,23 @@ class AssetLineMonth(Base):
     actual = Column(Numeric)
 
 
-class TacticLine(Base):
-    __tablename__ = 'tactic_lines'
+class Team(Base):
+    """Explicit team registry - `name` is the PK, a team exists iff it has a
+    row here (independent of whether it has any budget or campaign yet).
+    `sub_teams` is a flat array of sub-team names - replaces the old
+    team_subteams table, same reasoning as Campaign.products above."""
+    __tablename__ = 'teams'
 
-    id = Column(Integer, primary_key=True)
-    campaign_id = Column(Integer, ForeignKey('campaigns.id', ondelete='CASCADE'), nullable=False)
-    tactic_name = Column(String, nullable=False)
-
-    months = relationship('TacticLineMonth', cascade='all, delete-orphan', backref='tactic_line')
-
-
-class TacticLineMonth(Base):
-    __tablename__ = 'tactic_line_months'
-
-    tactic_line_id = Column(Integer, ForeignKey('tactic_lines.id', ondelete='CASCADE'), primary_key=True)
-    year = Column(Integer, primary_key=True)
-    month = Column(String, primary_key=True)
-    plan = Column(Numeric)
-    forecast = Column(Numeric)
-    commit = Column(Numeric)
-    actual = Column(Numeric)
+    name = Column(String, primary_key=True)
+    sub_teams = Column(ARRAY(String), nullable=False, default=list)
 
 
 class TeamBudget(Base):
     """Quarterly $ allocated by Marketing Ops per team - set before Plan even
-    exists, not tied to any campaign or month. A team 'exists' in the app iff
-    it has at least one row here (any year, any amount, including null) -
-    this doubles as the team registry, same as before the JSONB detour."""
+    exists, not tied to any campaign or month."""
     __tablename__ = 'team_budgets'
 
-    team = Column(String, primary_key=True)
+    team = Column(String, ForeignKey('teams.name', ondelete='CASCADE'), primary_key=True)
     year = Column(Integer, primary_key=True)
     quarter = Column(String, primary_key=True)
     amount = Column(Numeric)
-
-
-class TeamSubteam(Base):
-    __tablename__ = 'team_subteams'
-
-    team = Column(String, primary_key=True)
-    sub_team = Column(String, primary_key=True)

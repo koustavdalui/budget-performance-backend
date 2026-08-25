@@ -7,9 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 
 from db import get_db, init_db
-from models import (
-    AssetLine, AssetLineMonth, Campaign, CampaignProduct, TacticLine, TacticLineMonth, TeamBudget, TeamSubteam,
-)
+from models import Campaign, SpendLine, SpendLineMonth, Team, TeamBudget
 from schemas import (
     CampaignIn, CampaignOut, TeamBudgetBulkIn, TeamBudgetBulkOut, TeamBudgetIn, TeamBudgetOut,
     TeamIn, TeamSubteamIn,
@@ -24,6 +22,18 @@ def _normalize_quarter(quarter: str) -> str:
     if q not in VALID_QUARTERS:
         raise HTTPException(400, f'Quarter must be one of {", ".join(VALID_QUARTERS)}')
     return q
+
+
+def _get_or_create_team(db: Session, name: str) -> Team:
+    """Team is the explicit registry - a team exists once this row exists,
+    regardless of budgets/sub_teams content. team_budgets.team FKs to this
+    table, so any budget write must ensure the team row exists first."""
+    t = db.get(Team, name)
+    if not t:
+        t = Team(name=name, sub_teams=[])
+        db.add(t)
+        db.flush()
+    return t
 
 
 app = FastAPI(title='Marketing Budget Backend')
@@ -61,8 +71,8 @@ def _rollup_lines(lines, rollup):
     """Builds one line's own {year: {month: {...}}} dict and accumulates its
     values into the shared campaign-level rollup (mutated in place). Used for
     both asset lines and tactic lines - the campaign total is the sum of BOTH
-    (see module docstring on AssetLine): different expense buckets, additive,
-    not two views of the same money."""
+    (see SpendLine's docstring in models.py): different expense buckets,
+    additive, not two views of the same money."""
     out = []
     for line, name_field, name in lines:
         line_months: dict = {}
@@ -89,15 +99,19 @@ def _rollup_lines(lines, rollup):
 
 def campaign_to_dict(c: Campaign) -> dict:
     rollup: dict = {}
-    asset_lines = _rollup_lines([(al, 'asset', al.asset_name) for al in c.asset_lines], rollup)
-    tactic_lines = _rollup_lines([(tl, 'tactic', tl.tactic_name) for tl in c.tactic_lines], rollup)
+    asset_lines = _rollup_lines(
+        [(l, 'asset', l.line_name) for l in c.spend_lines if l.line_type == 'asset'], rollup,
+    )
+    tactic_lines = _rollup_lines(
+        [(l, 'tactic', l.line_name) for l in c.spend_lines if l.line_type == 'tactic'], rollup,
+    )
 
     return {
         'id': c.id,
         'campaign': c.campaign_name,
         'campaignId': c.source_campaign_id,
         'product': c.product,
-        'products': [p.product for p in c.products],
+        'products': list(c.products or []),
         'region': c.region,
         'team': c.team,
         'subTeam': c.sub_team,
@@ -121,6 +135,7 @@ def apply_fields(c: Campaign, data: CampaignIn):
     c.campaign_name = data.campaign
     c.source_campaign_id = data.campaignId
     c.product = data.product
+    c.products = list(data.products)
     c.region = data.region
     c.team = data.team
     c.sub_team = data.subTeam
@@ -136,23 +151,21 @@ def apply_fields(c: Campaign, data: CampaignIn):
     c.conv_rate = data.convRate
 
     # Replace-all strategy for child rows - simplest correct behavior for a v1 API.
-    c.products = [CampaignProduct(product=p) for p in data.products]
-    c.asset_lines = [
-        AssetLine(
-            asset_name=al.asset,
+    c.spend_lines = [
+        SpendLine(
+            line_type='asset', line_name=al.asset,
             months=[
-                AssetLineMonth(year=int(year_str), month=m, plan=v.plan, forecast=v.forecast, commit=v.commit, actual=v.actual)
+                SpendLineMonth(year=int(year_str), month=m, plan=v.plan, forecast=v.forecast, commit=v.commit, actual=v.actual)
                 for year_str, month_map in al.months.items()
                 for m, v in month_map.items()
             ],
         )
         for al in data.assetLines
-    ]
-    c.tactic_lines = [
-        TacticLine(
-            tactic_name=tl.tactic,
+    ] + [
+        SpendLine(
+            line_type='tactic', line_name=tl.tactic,
             months=[
-                TacticLineMonth(year=int(year_str), month=m, plan=v.plan, forecast=v.forecast, commit=v.commit, actual=v.actual)
+                SpendLineMonth(year=int(year_str), month=m, plan=v.plan, forecast=v.forecast, commit=v.commit, actual=v.actual)
                 for year_str, month_map in tl.months.items()
                 for m, v in month_map.items()
             ],
@@ -166,11 +179,7 @@ def health():
     return {'status': 'ok'}
 
 
-LINES_EAGER = [
-    selectinload(Campaign.products),
-    selectinload(Campaign.asset_lines).selectinload(AssetLine.months),
-    selectinload(Campaign.tactic_lines).selectinload(TacticLine.months),
-]
+LINES_EAGER = [selectinload(Campaign.spend_lines).selectinload(SpendLine.months)]
 
 
 @app.get('/api/campaigns', response_model=list[CampaignOut])
@@ -240,6 +249,7 @@ def list_budgets(db: Session = Depends(get_db)):
 @app.put('/api/budgets/{team}/{year}/{quarter}', response_model=TeamBudgetOut)
 def upsert_budget(team: str, year: int, quarter: str, data: TeamBudgetIn, db: Session = Depends(get_db)):
     quarter = _normalize_quarter(quarter)
+    _get_or_create_team(db, team)
     b = db.get(TeamBudget, (team, year, quarter))
     if not b:
         b = TeamBudget(team=team, year=year, quarter=quarter)
@@ -253,10 +263,9 @@ def upsert_budget(team: str, year: int, quarter: str, data: TeamBudgetIn, db: Se
 @app.post('/api/budgets/bulk', response_model=TeamBudgetBulkOut)
 def bulk_upsert_budgets(data: TeamBudgetBulkIn, db: Session = Depends(get_db)):
     """Upsert or clear many quarterly team budgets in one transaction.
-    Unknown teams are registered automatically (a TeamBudget row is created on
-    first touch). action=delete removes that row entirely; if it was the
-    team's only budget row anywhere, the team stops "existing" - same
-    registration-by-budget-row semantics as create_team below."""
+    Unknown teams are registered automatically (a Team row is created on
+    first touch, since team_budgets.team FKs to teams.name). action=delete
+    removes that row entirely."""
     upserted = 0
     deleted = 0
     for row in data.rows:
@@ -267,12 +276,14 @@ def bulk_upsert_budgets(data: TeamBudgetBulkIn, db: Session = Depends(get_db)):
         action = (row.action or 'update').strip().lower()
         if action not in ('update', 'create', 'delete'):
             raise HTTPException(400, f'Action must be update, create, or delete (got "{row.action}")')
-        b = db.get(TeamBudget, (team, row.year, quarter))
         if action == 'delete':
+            b = db.get(TeamBudget, (team, row.year, quarter))
             if b:
                 db.delete(b)
                 deleted += 1
         else:
+            _get_or_create_team(db, team)
+            b = db.get(TeamBudget, (team, row.year, quarter))
             if not b:
                 b = TeamBudget(team=team, year=row.year, quarter=quarter)
                 db.add(b)
@@ -288,37 +299,37 @@ def bulk_upsert_budgets(data: TeamBudgetBulkIn, db: Session = Depends(get_db)):
 
 @app.get('/api/teams')
 def list_teams(db: Session = Depends(get_db)):
-    """A team 'exists' if it has a team_budgets row (any year, any amount,
-    including null) - this is the durable team registry, independent of
-    whether any campaign has been created for it yet."""
-    rows = db.query(TeamBudget.team).distinct().order_by(TeamBudget.team).all()
+    """A team 'exists' if it has a row in the teams table - the explicit
+    registry, independent of whether it has any budget or campaign yet."""
+    rows = db.query(Team.name).order_by(Team.name).all()
     return [r[0] for r in rows]
 
 
 @app.post('/api/teams', status_code=201)
 def create_team(data: TeamIn, db: Session = Depends(get_db)):
-    """Idempotent: registers the team by ensuring a budget row exists for it
-    (just Q1 is enough to mark existence - the team registry only needs one
-    row), without touching the amount if one is already there."""
-    existing = db.get(TeamBudget, (data.team, DEFAULT_YEAR, 'Q1'))
-    if not existing:
-        db.add(TeamBudget(team=data.team, year=DEFAULT_YEAR, quarter='Q1', amount=None))
-        db.commit()
+    """Idempotent: registers the team if it doesn't already exist."""
+    _get_or_create_team(db, data.team)
+    db.commit()
     return {'team': data.team}
 
 
 @app.get('/api/subteams')
 def list_subteams(db: Session = Depends(get_db)):
-    rows = db.query(TeamSubteam).order_by(TeamSubteam.team, TeamSubteam.sub_team).all()
-    return [{'team': r.team, 'subTeam': r.sub_team} for r in rows]
+    rows = []
+    for t in db.query(Team).order_by(Team.name).all():
+        for st in sorted(t.sub_teams or []):
+            rows.append({'team': t.name, 'subTeam': st})
+    return rows
 
 
 @app.post('/api/subteams', status_code=201)
 def create_subteam(data: TeamSubteamIn, db: Session = Depends(get_db)):
-    existing = db.get(TeamSubteam, (data.team, data.subTeam))
-    if not existing:
-        db.add(TeamSubteam(team=data.team, sub_team=data.subTeam))
-        db.commit()
+    t = _get_or_create_team(db, data.team)
+    subs = list(t.sub_teams or [])
+    if data.subTeam not in subs:
+        subs.append(data.subTeam)
+        t.sub_teams = subs
+    db.commit()
     return {'team': data.team, 'subTeam': data.subTeam}
 
 
@@ -327,9 +338,10 @@ def delete_team(team: str, db: Session = Depends(get_db)):
     in_use = db.query(Campaign).filter(Campaign.team == team).count()
     if in_use:
         raise HTTPException(400, f'Cannot delete "{team}": {in_use} campaign(s) still use this team.')
-    db.query(TeamBudget).filter(TeamBudget.team == team).delete()
-    db.query(TeamSubteam).filter(TeamSubteam.team == team).delete()
-    db.commit()
+    t = db.get(Team, team)
+    if t:
+        db.delete(t)  # team_budgets rows cascade-delete via the FK
+        db.commit()
 
 
 @app.delete('/api/subteams/{team}/{sub_team}', status_code=204)
@@ -337,7 +349,7 @@ def delete_subteam(team: str, sub_team: str, db: Session = Depends(get_db)):
     in_use = db.query(Campaign).filter(Campaign.team == team, Campaign.sub_team == sub_team).count()
     if in_use:
         raise HTTPException(400, f'Cannot delete "{sub_team}": {in_use} campaign(s) still use this sub team.')
-    row = db.get(TeamSubteam, (team, sub_team))
-    if row:
-        db.delete(row)
+    t = db.get(Team, team)
+    if t and sub_team in (t.sub_teams or []):
+        t.sub_teams = [s for s in t.sub_teams if s != sub_team]
         db.commit()

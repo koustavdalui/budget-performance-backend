@@ -17,10 +17,10 @@ BEGIN;
 --    Base.metadata.create_all() (called on every API startup) recreates any
 --    table it doesn't see under its declared name.
 DROP TABLE campaign_products;
-DROP TABLE asset_lines;
 DROP TABLE asset_line_months;
-DROP TABLE tactic_lines;
+DROP TABLE asset_lines;
 DROP TABLE tactic_line_months;
+DROP TABLE tactic_lines;
 DROP TABLE team_budgets;
 DROP TABLE team_subteams;
 

@@ -86,34 +86,49 @@ lines from the tag (there's no historical per-tactic $ to recover).
 
 ## Schema
 
-Eight tables, normalized (see `api/models.py` for exact columns):
+Five tables (see `api/models.py` for exact columns) - normalized, no JSON
+blobs anywhere:
 
-- `campaigns` - one row per campaign.
-- `campaign_products` - `(campaign_id, product)` composite PK - a campaign's
-  product tags.
-- `asset_lines` + `asset_line_months` - one row per asset-tagged spend line,
-  months exploded one row per `(asset_line_id, year, month)`.
-- `tactic_lines` + `tactic_line_months` - same shape, for tactic-tagged spend
-  lines. Asset and tactic lines are independent, additive expense buckets -
-  a campaign's total is sum(asset lines) + sum(tactic lines), not one or the
-  other.
+- `campaigns` - one row per campaign. `products` (the Python/API attribute)
+  maps to the physical column `product_tags`, a plain Postgres array of
+  strings - not a join table, not JSON, just a flat inspectable list
+  (`{EOR,AOR}` in any SQL client). The `products` column itself is a dead
+  leftover from an earlier, reverted JSONB attempt - left in place unused
+  rather than dropped, which is why the live column is named `product_tags`.
+- `spend_lines` - one row per asset OR tactic spend line (`line_type` is
+  `'asset'`/`'tactic'`, CHECK-constrained), FK'd to its campaign with
+  `ON DELETE CASCADE`. Asset and tactic lines are independent, additive
+  expense buckets - a campaign's total is sum(asset lines) + sum(tactic
+  lines), not one or the other; `line_type` is just how they're told apart.
+- `spend_line_months` - one row per `(spend_line_id, year, month)`, real
+  numeric `plan`/`forecast`/`commit`/`actual` columns - the only place $ is
+  stored, never a blob.
+- `teams` - the team registry (`name` is the PK - a team exists iff it has a
+  row here). `sub_teams` is a plain Postgres array of sub-team names, same
+  reasoning as `campaigns.products` above - not a join table, not JSON.
 - `team_budgets` - `(team, year, quarter, amount)`, PK on `(team, year,
-  quarter)`. Quarterly $ allocated by Marketing Ops, set before Plan exists.
-  A team "exists" in the app iff it has at least one row here (any year, any
-  amount, including null) - this doubles as the team registry.
-- `team_subteams` - `(team, sub_team)` composite PK.
+  quarter)`, `team` FK's to `teams.name`. Quarterly $ allocated by Marketing
+  Ops, set before Plan exists.
 
-**History**: this was briefly consolidated into 3 tables (`campaigns` +
-`products` JSONB column, `campaign_lines`, `teams`) with month/product data
-stored as JSONB blobs instead of normalized rows. That was reverted - the
-JSONB storage made the data opaque to inspect directly (e.g. in DBeaver), and
-a leftover `Legacy*` model/`create_all()` interaction was silently
-recreating empty duplicate tables under the original names on every API
-restart. The normalized schema above is back to being the one true source of
-truth; the now-unused `deprecated_campaign_lines`/`deprecated_teams` tables
-are kept as a reference buffer and can be dropped once confirmed unneeded.
-The API's wire format (`months`/`products`/`assetLines`/`tacticLines` JSON
-shapes) is unchanged either way, so this is a storage-only concern.
+**History**: this schema went through two prior shapes. First, an 8-table
+fully-normalized design (`campaign_products`, `asset_lines` +
+`asset_line_months`, `tactic_lines` + `tactic_line_months`, `team_budgets`,
+`team_subteams`) - correct, but more tables than needed. Then a 3-table JSONB
+consolidation (`campaigns` + `products` JSONB column, `campaign_lines`,
+`teams` with JSONB `budgets`/`sub_teams`) - fewer tables, but the JSONB blobs
+made the data opaque to inspect directly (e.g. in DBeaver), and a leftover
+`Legacy*` model/`create_all()` interaction was silently recreating empty
+duplicate tables under the original names on every API restart. That was
+reverted back to the 8-table design, then consolidated again into the
+current 5-table shape - discriminator columns (`line_type`) and native
+Postgres arrays (`product_tags`, `sub_teams`) instead of JSON, so every value
+stays a real, individually inspectable column. The two now-superseded sets
+of tables from the earlier attempts (`legacy2_asset_lines` etc. from the
+8-table era, `deprecated_campaign_lines`/`deprecated_teams` from the JSONB
+era) are kept as reference buffers rather than dropped - safe to remove once
+confirmed unneeded. The API's wire format
+(`months`/`products`/`assetLines`/`tacticLines` JSON shapes) hasn't changed
+across any of this, so the frontend has never needed to change either.
 
 ## Data model note
 
