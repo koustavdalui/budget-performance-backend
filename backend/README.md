@@ -59,7 +59,7 @@ from it too.
 | GET | `/api/budgets` | list all team budgets (any team, any year, any quarter) |
 | PUT | `/api/budgets/{team}/{year}/{quarter}` | upsert a team's quarterly budget amount (Q1–Q4) |
 | POST | `/api/budgets/bulk` | upsert/clear many quarterly budget rows in one transaction; unknown teams are registered automatically |
-| GET | `/api/teams` | list registered teams (a team "exists" once it has a budget row, even with a null amount) |
+| GET | `/api/teams` | list registered teams (a team "exists" once it has a row in `teams`) |
 | POST | `/api/teams` | register a new team (idempotent) |
 | DELETE | `/api/teams/{team}` | delete a team - 400 if any campaign still uses it |
 | GET | `/api/subteams` | list all `{team, subTeam}` pairs |
@@ -86,13 +86,28 @@ lines from the tag (there's no historical per-tactic $ to recover).
 
 ## Schema
 
-`campaigns` (one row per campaign) → `campaign_products` (which products it's
-tagged with, many-to-many) + `asset_lines` → `asset_line_months` and
-`tactic_lines` → `tactic_line_months` (year, month, Plan/Forecast/Commit/
-Actual - the only place $ is stored, one pair of tables per line type). See
-`api/models.py` for the exact columns. `team_budgets` doubles as the team
-registry (one row per team per year per quarter) and `team_subteams` as the
-sub-team registry.
+Three tables (see `api/models.py` for exact columns):
+
+- `campaigns` - one row per campaign. `products` is a JSONB array of strings
+  (e.g. `["EOR","AOR"]`) right on the row.
+- `campaign_lines` - one row per asset OR tactic spend line
+  (`line_type` is `'asset'`/`'tactic'`, DB-`CHECK`-constrained), FK'd to its
+  campaign with `ON DELETE CASCADE`. `months` is a JSONB blob keyed by year
+  then month abbreviation - `{"2026": {"Jan": {"plan":.., "forecast":..,
+  "commit":.., "actual":..}}}` - the only place $ is stored, both line types
+  additive for the campaign total.
+- `teams` - the team registry (`name` is the PK - a team exists iff it has a
+  row here). `budgets` is JSONB `{year: {quarter: amount}}` (Marketing Ops'
+  quarterly $, set before Plan exists); `sub_teams` is a JSONB array of
+  sub-team names.
+
+This replaced an earlier 8-table design (`campaign_products`, `asset_lines` +
+`asset_line_months`, `tactic_lines` + `tactic_line_months`, `team_budgets`,
+`team_subteams`) - the API's wire format is unchanged (same nested
+`months`/`products`/`assetLines`/`tacticLines` shapes), only storage changed.
+`backend/migrate_consolidate.py` is the one-time backfill script that moved
+existing data over; the old tables still exist renamed as `legacy_*` as a
+rollback window and can be dropped once confirmed stable.
 
 ## Data model note
 

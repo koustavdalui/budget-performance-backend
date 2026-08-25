@@ -27,9 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'api'))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from models import (
-    AssetLine, AssetLineMonth, Base, Campaign, CampaignProduct, TacticLine, TacticLineMonth, TeamBudget, TeamSubteam,
-)
+from models import Base, Campaign, CampaignLine, Team
 
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://budget:budget@localhost:5432/budget')
 DATA_FILE = Path(__file__).parent.parent / 'scripts' / 'budget_data.json'
@@ -57,7 +55,7 @@ def parse_date(s):
 def build_lines(campaign_data):
     """Returns (asset_lines, tactic_lines) - each a list of {asset|tactic: name,
     months: {year: {month: {...}}}}. Assets and tactics are independent
-    expense buckets, additive for the campaign total (see AssetLine's
+    expense buckets, additive for the campaign total (see CampaignLine's
     docstring in models.py) - never merge one asset with one tactic onto a
     single line. Accepts three shapes:
       - already-split (assetLines + tacticLines present, no spendLines): a
@@ -116,11 +114,29 @@ def build_lines(campaign_data):
     return asset_lines, tactic_lines
 
 
+def _line_months_json(months_by_year):
+    """month_map values here are already plain {plan,forecast,commit,actual}
+    dicts (not Pydantic models, unlike the API's _months_to_json) - seed.py
+    reads straight from JSON files, so this just re-keys years as strings for
+    JSON storage."""
+    return {
+        str(year): {
+            m: {
+                'plan': v.get('plan'), 'forecast': v.get('forecast'),
+                'commit': v.get('commit'), 'actual': v.get('actual'),
+            }
+            for m, v in month_map.items()
+        }
+        for year, month_map in months_by_year.items()
+    }
+
+
 def build_campaign(team, data):
     c = Campaign(
         campaign_name=data['campaign'],
         source_campaign_id=data.get('campaignId'),
         product=data.get('product'),
+        products=list(data.get('products', [])),
         region=data.get('region'),
         team=team,
         sub_team=data.get('subTeam'),
@@ -135,34 +151,12 @@ def build_campaign(team, data):
         end_date=parse_date(data.get('endDate')),
         conv_rate=data.get('convRate'),
     )
-    c.products = [CampaignProduct(product=p) for p in data.get('products', [])]
     asset_lines_data, tactic_lines_data = build_lines(data)
-    c.asset_lines = [
-        AssetLine(
-            asset_name=al['asset'],
-            months=[
-                AssetLineMonth(
-                    year=year, month=m,
-                    plan=v.get('plan'), forecast=v.get('forecast'), commit=v.get('commit'), actual=v.get('actual'),
-                )
-                for year, month_map in al['months'].items()
-                for m, v in month_map.items()
-            ],
-        )
+    c.lines = [
+        CampaignLine(line_type='asset', line_name=al['asset'], months=_line_months_json(al['months']))
         for al in asset_lines_data
-    ]
-    c.tactic_lines = [
-        TacticLine(
-            tactic_name=tl['tactic'],
-            months=[
-                TacticLineMonth(
-                    year=year, month=m,
-                    plan=v.get('plan'), forecast=v.get('forecast'), commit=v.get('commit'), actual=v.get('actual'),
-                )
-                for year, month_map in tl['months'].items()
-                for m, v in month_map.items()
-            ],
-        )
+    ] + [
+        CampaignLine(line_type='tactic', line_name=tl['tactic'], months=_line_months_json(tl['months']))
         for tl in tactic_lines_data
     ]
     return c
@@ -246,15 +240,21 @@ def main():
                 per_quarter = (row['amount'] / 4) if row['amount'] is not None else None
                 for q in ('Q1', 'Q2', 'Q3', 'Q4'):
                     budget_amounts[(row['team'], row['year'], q)] = per_quarter
+    # teams is now the single registry (name PK) - a team from teams_seen with
+    # zero budget rows still needs a Team row created so it "exists".
+    teams_by_name = {}
     for team_name in teams_seen:
-        budget_amounts.setdefault((team_name, DEFAULT_YEAR, 'Q1'), None)  # ensure at least a registration row
-
+        teams_by_name[team_name] = Team(name=team_name, sub_teams=[], budgets={})
     for (team_name, year, quarter), amount in budget_amounts.items():
-        if not session.get(TeamBudget, (team_name, year, quarter)):
-            session.add(TeamBudget(team=team_name, year=year, quarter=quarter, amount=amount))
+        t = teams_by_name.setdefault(team_name, Team(name=team_name, sub_teams=[], budgets={}))
+        t.budgets.setdefault(str(year), {})[quarter] = amount
     for team_name, sub_team in team_subteams:
-        if not session.get(TeamSubteam, (team_name, sub_team)):
-            session.add(TeamSubteam(team=team_name, sub_team=sub_team))
+        t = teams_by_name.setdefault(team_name, Team(name=team_name, sub_teams=[], budgets={}))
+        if sub_team not in t.sub_teams:
+            t.sub_teams.append(sub_team)
+    for t in teams_by_name.values():
+        if not session.get(Team, t.name):
+            session.add(t)
 
     session.commit()
     print(f'Seeded {count} campaigns, {len(team_subteams)} team/sub-team pair(s), '
