@@ -86,28 +86,34 @@ lines from the tag (there's no historical per-tactic $ to recover).
 
 ## Schema
 
-Three tables (see `api/models.py` for exact columns):
+Eight tables, normalized (see `api/models.py` for exact columns):
 
-- `campaigns` - one row per campaign. `products` is a JSONB array of strings
-  (e.g. `["EOR","AOR"]`) right on the row.
-- `campaign_lines` - one row per asset OR tactic spend line
-  (`line_type` is `'asset'`/`'tactic'`, DB-`CHECK`-constrained), FK'd to its
-  campaign with `ON DELETE CASCADE`. `months` is a JSONB blob keyed by year
-  then month abbreviation - `{"2026": {"Jan": {"plan":.., "forecast":..,
-  "commit":.., "actual":..}}}` - the only place $ is stored, both line types
-  additive for the campaign total.
-- `teams` - the team registry (`name` is the PK - a team exists iff it has a
-  row here). `budgets` is JSONB `{year: {quarter: amount}}` (Marketing Ops'
-  quarterly $, set before Plan exists); `sub_teams` is a JSONB array of
-  sub-team names.
+- `campaigns` - one row per campaign.
+- `campaign_products` - `(campaign_id, product)` composite PK - a campaign's
+  product tags.
+- `asset_lines` + `asset_line_months` - one row per asset-tagged spend line,
+  months exploded one row per `(asset_line_id, year, month)`.
+- `tactic_lines` + `tactic_line_months` - same shape, for tactic-tagged spend
+  lines. Asset and tactic lines are independent, additive expense buckets -
+  a campaign's total is sum(asset lines) + sum(tactic lines), not one or the
+  other.
+- `team_budgets` - `(team, year, quarter, amount)`, PK on `(team, year,
+  quarter)`. Quarterly $ allocated by Marketing Ops, set before Plan exists.
+  A team "exists" in the app iff it has at least one row here (any year, any
+  amount, including null) - this doubles as the team registry.
+- `team_subteams` - `(team, sub_team)` composite PK.
 
-This replaced an earlier 8-table design (`campaign_products`, `asset_lines` +
-`asset_line_months`, `tactic_lines` + `tactic_line_months`, `team_budgets`,
-`team_subteams`) - the API's wire format is unchanged (same nested
-`months`/`products`/`assetLines`/`tacticLines` shapes), only storage changed.
-`backend/migrate_consolidate.py` is the one-time backfill script that moved
-existing data over; the old tables still exist renamed as `legacy_*` as a
-rollback window and can be dropped once confirmed stable.
+**History**: this was briefly consolidated into 3 tables (`campaigns` +
+`products` JSONB column, `campaign_lines`, `teams`) with month/product data
+stored as JSONB blobs instead of normalized rows. That was reverted - the
+JSONB storage made the data opaque to inspect directly (e.g. in DBeaver), and
+a leftover `Legacy*` model/`create_all()` interaction was silently
+recreating empty duplicate tables under the original names on every API
+restart. The normalized schema above is back to being the one true source of
+truth; the now-unused `deprecated_campaign_lines`/`deprecated_teams` tables
+are kept as a reference buffer and can be dropped once confirmed unneeded.
+The API's wire format (`months`/`products`/`assetLines`/`tacticLines` JSON
+shapes) is unchanged either way, so this is a storage-only concern.
 
 ## Data model note
 
