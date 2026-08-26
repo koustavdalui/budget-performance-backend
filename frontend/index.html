@@ -3152,12 +3152,37 @@ const IMPORT_CAMPAIGN_TYPE_SUBTYPES = {
 const IMPORT_ASSET_LINE_NAMES = ['1:1 Meeting','Agency Retainer','Battle Cards','Blog','Booth','Case Studies','Contact Request','Demand Gen Page','eBook','Employment Guide','Event Registrations','Event Sponsorship','Goodies/Swag','Guide','Infographics','Inquiry','Interactive Asset','Interactive Demos','Landing Page Copy','Marketing Emails','Marketplace Signups','Newsletter','On-Demand Webinar','Other Miscellaneous','Partner Lead Submission','Podcast','Presentation','Promotion fee for ISV/Channel Partner','Reports','ROI Calculator','Survey','Translations & Localizations','Trial Signups','Video','Web Content Management','Whitepaper','Travel & Accom','Activations','Others','Printing/Signage','Speakers'];
 const IMPORT_TACTIC_LINE_NAMES = ['AE Emails','Agency Retainer','Chat','Content Syndication','Customer Retention & Growth','Direct Mails','Direct Traffic','Display','External List Buys','In-Product','Influencer','Internal Referral','Marketing Emails','Newsletter','Organic Search','Organic Social','Outbound Prospecting','Paid Search','Paid Media','Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations','Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing','QR Code'];
 
+// Case-insensitive lookup: marketing folks type "paid" / "PAID" / "Paid"
+// interchangeably - match any casing but always normalize to the exact
+// canonical spelling these lists use, so downstream code (grouping, dashboard
+// filters) only ever sees one consistent casing per value.
+function buildCaseInsensitiveIndex(values){
+  const m = new Map();
+  values.forEach(v=> m.set(v.toLowerCase(), v));
+  return m;
+}
+const IMPORT_TYPE_CANON = buildCaseInsensitiveIndex(['Campaign','Asset','Tactic']);
+const IMPORT_CAMPAIGN_TYPE_CANON = buildCaseInsensitiveIndex(Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES));
+const IMPORT_SUBCAMPAIGN_TYPE_CANON = buildCaseInsensitiveIndex(
+  [...new Set(Object.values(IMPORT_CAMPAIGN_TYPE_SUBTYPES).flat())]
+);
+const IMPORT_ASSET_LINE_CANON = buildCaseInsensitiveIndex(IMPORT_ASSET_LINE_NAMES);
+const IMPORT_TACTIC_LINE_CANON = buildCaseInsensitiveIndex(IMPORT_TACTIC_LINE_NAMES);
+function importCanon(map, v){
+  if (!v) return v;
+  return map.get(v.toLowerCase()) || v;  // unrecognized values pass through untouched, so validation still flags them
+}
+
 function normalizeImportRow(obj){
   const out = {};
   Object.keys(obj||{}).forEach(k=>{
     const v = obj[k];
     out[String(k).trim()] = (v===null||v===undefined) ? '' : String(v).trim();
   });
+  out.Type = importCanon(IMPORT_TYPE_CANON, out.Type);
+  out.CampaignType = importCanon(IMPORT_CAMPAIGN_TYPE_CANON, out.CampaignType);
+  out.SubCampaignType = importCanon(IMPORT_SUBCAMPAIGN_TYPE_CANON, out.SubCampaignType);
+  out.LineName = importCanon(out.Type==='Tactic' ? IMPORT_TACTIC_LINE_CANON : IMPORT_ASSET_LINE_CANON, out.LineName);
   return out;
 }
 function csvEscape(v){
@@ -3323,7 +3348,7 @@ function buildLinesFromGroup(lineRows, type, existingLines){
 
 function importGroupToPayload(g, existing){
   const cRow = g.campaignRow;
-  const products = cRow.Products ? cRow.Products.split(';').map(s=>s.trim()).filter(Boolean) : (existing ? existing.products : []);
+  const products = cRow.Products ? cRow.Products.split(/[;,]/).map(s=>s.trim()).filter(Boolean) : (existing ? existing.products : []);
   return {
     campaign: cRow.Campaign,
     campaignId: cRow.CampaignId || (existing ? existing.campaignId : null),
