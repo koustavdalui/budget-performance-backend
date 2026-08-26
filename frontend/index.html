@@ -1968,12 +1968,12 @@ const ASSET_TAXONOMY = ['1:1 Meeting','Agency Retainer','Battle Cards','Blog','B
   'Marketplace Signups','Newsletter','On-Demand Webinar','Other Miscellaneous','Partner Lead Submission','Podcast',
   'Presentation','Promotion fee for ISV/Channel Partner','Reports','ROI Calculator','Survey',
   'Translations & Localizations','Trial Signups','Video','Web Content Management','Whitepaper','Travel & Accom',
-  'Activations','Others'];
+  'Activations','Others','Printing/Signage','Speakers'];
 const TACTIC_TAXONOMY = ['AE Emails','Agency Retainer','Chat','Content Syndication','Customer Retention & Growth',
   'Direct Mails','Direct Traffic','Display','External List Buys','In-Product','Influencer','Internal Referral',
   'Marketing Emails','Newsletter','Organic Search','Organic Social','Outbound Prospecting','Paid Search','Paid Media',
   'Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations',
-  'Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing'];
+  'Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing','QR Code'];
 const entryTreeState = { expandedTeams: new Set(), expandedSubTeams: new Set(), seenTeams: new Set() };
 // Own year / quarter / month filters for Data Entry campaign totals — independent
 // of the Dashboard. Empty quarter/month lists mean nothing selected (no $).
@@ -3140,15 +3140,17 @@ const IMPORT_CAMPAIGN_TYPE_SUBTYPES = {
   'Webinar': ['Webinar'],
   'Event': ['Virtual Event','In-Person Event','Executive Dinner','Workshop','Customer Event','Partner Event','Third-Party Event'],
   'Email': ['Email Campaign','Nurture Campaign'],
-  'Paid': ['Paid Search','Paid Social','Display'],
+  'Paid': ['Paid Search','Paid Social','Display','Paid Referral','Paid LLM'],
   'Organic': ['Organic Social','Organic Search'],
   'Content Syndication': ['Content Syndication'],
   'Website Gated': ['Demo Request'],
   'Referral': ['Referral Traffic'],
   'Direct Mail': ['Direct Mail'],
+  'Press Release': ['Press Release'],
+  'Others': ['Others'],
 };
-const IMPORT_ASSET_LINE_NAMES = ['1:1 Meeting','Agency Retainer','Battle Cards','Blog','Booth','Case Studies','Contact Request','Demand Gen Page','eBook','Employment Guide','Event Registrations','Event Sponsorship','Goodies/Swag','Guide','Infographics','Inquiry','Interactive Asset','Interactive Demos','Landing Page Copy','Marketing Emails','Marketplace Signups','Newsletter','On-Demand Webinar','Other Miscellaneous','Partner Lead Submission','Podcast','Presentation','Promotion fee for ISV/Channel Partner','Reports','ROI Calculator','Survey','Translations & Localizations','Trial Signups','Video','Web Content Management','Whitepaper','Travel & Accom','Activations','Others'];
-const IMPORT_TACTIC_LINE_NAMES = ['AE Emails','Agency Retainer','Chat','Content Syndication','Customer Retention & Growth','Direct Mails','Direct Traffic','Display','External List Buys','In-Product','Influencer','Internal Referral','Marketing Emails','Newsletter','Organic Search','Organic Social','Outbound Prospecting','Paid Search','Paid Media','Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations','Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing'];
+const IMPORT_ASSET_LINE_NAMES = ['1:1 Meeting','Agency Retainer','Battle Cards','Blog','Booth','Case Studies','Contact Request','Demand Gen Page','eBook','Employment Guide','Event Registrations','Event Sponsorship','Goodies/Swag','Guide','Infographics','Inquiry','Interactive Asset','Interactive Demos','Landing Page Copy','Marketing Emails','Marketplace Signups','Newsletter','On-Demand Webinar','Other Miscellaneous','Partner Lead Submission','Podcast','Presentation','Promotion fee for ISV/Channel Partner','Reports','ROI Calculator','Survey','Translations & Localizations','Trial Signups','Video','Web Content Management','Whitepaper','Travel & Accom','Activations','Others','Printing/Signage','Speakers'];
+const IMPORT_TACTIC_LINE_NAMES = ['AE Emails','Agency Retainer','Chat','Content Syndication','Customer Retention & Growth','Direct Mails','Direct Traffic','Display','External List Buys','In-Product','Influencer','Internal Referral','Marketing Emails','Newsletter','Organic Search','Organic Social','Outbound Prospecting','Paid Search','Paid Media','Paid Social','Partner Referral','Podcast','Press Release','Print','Referral Traffic','Reseller Registrations','Review Site Traffic','SDR Emails','Support Email','Telemarketing','Web Publishing','QR Code'];
 
 function normalizeImportRow(obj){
   const out = {};

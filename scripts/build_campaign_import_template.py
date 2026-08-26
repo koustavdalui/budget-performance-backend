@@ -30,12 +30,14 @@ CAMPAIGN_TYPE_SUBTYPES = {
     'Event': ['Virtual Event', 'In-Person Event', 'Executive Dinner', 'Workshop',
               'Customer Event', 'Partner Event', 'Third-Party Event'],
     'Email': ['Email Campaign', 'Nurture Campaign'],
-    'Paid': ['Paid Search', 'Paid Social', 'Display'],
+    'Paid': ['Paid Search', 'Paid Social', 'Display', 'Paid Referral', 'Paid LLM'],
     'Organic': ['Organic Social', 'Organic Search'],
     'Content Syndication': ['Content Syndication'],
     'Website Gated': ['Demo Request'],
     'Referral': ['Referral Traffic'],
     'Direct Mail': ['Direct Mail'],
+    'Press Release': ['Press Release'],
+    'Others': ['Others'],
 }
 
 ASSET_LINE_NAMES = [
@@ -47,6 +49,7 @@ ASSET_LINE_NAMES = [
     'Podcast', 'Presentation', 'Promotion fee for ISV/Channel Partner', 'Reports',
     'ROI Calculator', 'Survey', 'Translations & Localizations', 'Trial Signups', 'Video',
     'Web Content Management', 'Whitepaper', 'Travel & Accom', 'Activations', 'Others',
+    'Printing/Signage', 'Speakers',
 ]
 
 TACTIC_LINE_NAMES = [
@@ -57,7 +60,7 @@ TACTIC_LINE_NAMES = [
     'Outbound Prospecting', 'Paid Search', 'Paid Media', 'Paid Social',
     'Partner Referral', 'Podcast', 'Press Release', 'Print', 'Referral Traffic',
     'Reseller Registrations', 'Review Site Traffic', 'SDR Emails', 'Support Email',
-    'Telemarketing', 'Web Publishing',
+    'Telemarketing', 'Web Publishing', 'QR Code',
 ]
 
 
