@@ -3297,19 +3297,28 @@ function downloadCampaignImportCsvFallback(){
 
 // Groups raw CSV rows by Campaign name (rows are linked by name, not
 // position) into {campaign, campaignRow, lineRows:[{row,index,type}]}.
+// Rows with a real Type/LineName/Year/$ but NO Campaign name at all can't be
+// linked to anything - the template requires Campaign repeated on every
+// row, not just the first one for each campaign - so those get collected
+// separately (`unassigned`) instead of silently vanishing, and
+// validateImportGroups surfaces them as an explicit error.
 function groupImportRows(rows){
   const groups = [];
   const byName = new Map();
+  const unassigned = [];
   rows.forEach((row, i)=>{
     const name = (row.Campaign||'').trim();
-    if (!name) return;
+    const type = (row.Type||'').trim();
+    if (!name){
+      if (type || row.LineName || row.Year) unassigned.push({row, index: i+2, type});
+      return;
+    }
     let g = byName.get(name);
     if (!g){ g = {campaign: name, campaignRow: null, lineRows: [], firstIndex: i+2}; byName.set(name, g); groups.push(g); }
-    const type = (row.Type||'').trim();
     if (type==='Campaign') g.campaignRow = row;
     else g.lineRows.push({row, index: i+2, type});
   });
-  return groups;
+  return {groups, unassigned};
 }
 
 // Collapses a group's Asset (or Tactic) rows into the AssetLineIn/TacticLineIn
@@ -3370,14 +3379,19 @@ function importGroupToPayload(g, existing){
 }
 
 function validateImportGroups(rows){
-  const groups = groupImportRows(rows.map(normalizeImportRow));
-  return groups.map(g=>{
+  const {groups, unassigned} = groupImportRows(rows.map(normalizeImportRow));
+  // entryState.teams is loaded live from the backend, not a static list like
+  // CampaignType/Asset/Tactic, so this index is rebuilt per validation run
+  // rather than as a module-level constant.
+  const teamCanon = buildCaseInsensitiveIndex(entryState.teams);
+  const results = groups.map(g=>{
     const errors = [];
     if (!g.campaignRow){
       errors.push('No Type=Campaign row found for this Campaign name');
       return {...g, action: 'update', errors};
     }
     const cRow = g.campaignRow;
+    if (cRow.Team) cRow.Team = importCanon(teamCanon, cRow.Team);
     const action = (cRow.Action||'').trim().toLowerCase() || 'update';
     if (cRow.Action && !['create','update','delete'].includes(action)) errors.push('Action must be Create, Update, or Delete (or blank)');
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
@@ -3408,6 +3422,16 @@ function validateImportGroups(rows){
     });
     return {...g, action, errors};
   });
+  if (unassigned.length){
+    results.push({
+      campaign: '(no Campaign name)', campaignRow: null, lineRows: unassigned,
+      firstIndex: unassigned[0].index, action: 'update',
+      errors: unassigned.map(({index})=>
+        `L${index}: this row has a Type/LineName/$ but no Campaign name, so it can't be linked to any campaign and its data would be lost - fill in Campaign to match the campaign row above it`
+      ),
+    });
+  }
+  return results;
 }
 
 let importParsedGroups = null;
