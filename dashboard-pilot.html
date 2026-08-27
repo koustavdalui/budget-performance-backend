@@ -950,7 +950,7 @@ function multiSelectHTML(key, label, options){
   return `
     <div class="grp msel" data-mkey="${key}">
       <label>${label}</label>
-      <button class="msel-btn" data-mkey="${key}">${btnLabel}</button>
+      <button class="msel-btn" data-mkey="${key}">${escapeHtml(btnLabel)}</button>
       <div class="msel-panel ${isOpen?'open':''}">
         <div class="msel-actions">
           <button data-act="all" data-mkey="${key}">Select all</button>
@@ -958,8 +958,8 @@ function multiSelectHTML(key, label, options){
         </div>
         ${options.map(o=>`
           <label class="msel-option">
-            <input type="checkbox" data-mkey="${key}" value="${o.replace(/"/g,'&quot;')}" ${selected.includes(o)?'checked':''}>
-            <span>${o}</span>
+            <input type="checkbox" data-mkey="${key}" value="${escapeHtml(o)}" ${selected.includes(o)?'checked':''}>
+            <span>${escapeHtml(o)}</span>
           </label>
         `).join('')}
       </div>
@@ -1403,7 +1403,7 @@ function campaignModalHTML(c){
         const ym = line.months[y]||{};
         const p = sumMonths(ym, MONTHS, 'plan'), f = sumMonths(ym, MONTHS, 'forecast'), cm = sumMonths(ym, MONTHS, 'commit');
         if (!(p||f||cm)) return '';
-        return `<tr><td style="text-align:left">${line[nameField]}</td><td style="text-align:left">${y}</td><td>${fmtMoney(p,false)}</td><td>${fmtMoney(f,false)}</td><td>${fmtMoney(cm,false)}</td></tr>`;
+        return `<tr><td style="text-align:left">${escapeHtml(line[nameField])}</td><td style="text-align:left">${y}</td><td>${fmtMoney(p,false)}</td><td>${fmtMoney(f,false)}</td><td>${fmtMoney(cm,false)}</td></tr>`;
       })
     ).filter(Boolean).join('');
   }
@@ -1416,7 +1416,7 @@ function campaignModalHTML(c){
         const ym = line.months[y]||{};
         return MONTHS.filter(m=> ym[m] && (ym[m].plan!=null || ym[m].forecast!=null || ym[m].commit!=null)).map(m=>{
           const v = ym[m];
-          return `<tr><td style="text-align:left">${line[nameField]}</td><td style="text-align:left">${y}</td><td style="text-align:left">${m}</td><td>${fmtMoney(v.plan,false)}</td><td>${fmtMoney(v.forecast,false)}</td><td>${fmtMoney(v.commit,false)}</td></tr>`;
+          return `<tr><td style="text-align:left">${escapeHtml(line[nameField])}</td><td style="text-align:left">${y}</td><td style="text-align:left">${m}</td><td>${fmtMoney(v.plan,false)}</td><td>${fmtMoney(v.forecast,false)}</td><td>${fmtMoney(v.commit,false)}</td></tr>`;
         });
       })
     ).join('');
@@ -1426,15 +1426,15 @@ function campaignModalHTML(c){
   const assetMonthRows = lineMonthRowsForModal(c.assetLines, 'asset');
   const tacticMonthRows = lineMonthRowsForModal(c.tacticLines, 'tactic');
   const tacticTags = [...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))];
-  const badges = [c.team, c.subTeam, c.region, c.product, ...tacticTags, c.campaignType, c.subCampaignType].filter(Boolean).map(b=>`<span class="badge">${b}</span>`).join('');
+  const badges = [c.team, c.subTeam, c.region, c.product, ...tacticTags, c.campaignType, c.subCampaignType].filter(Boolean).map(b=>`<span class="badge">${escapeHtml(b)}</span>`).join('');
   return `
-    <div class="modal-title">${c.campaign}</div>
+    <div class="modal-title">${escapeHtml(c.campaign)}</div>
     <div class="modal-badges">${badges}</div>
-    ${c.campaignId?`<div class="modal-meta"><b>Campaign ID:</b> ${c.campaignId}</div>`:''}
-    ${c.theme?`<div class="modal-meta"><b>Theme:</b> ${c.theme}</div>`:''}
-    ${c.objective?`<div class="modal-meta"><b>Objective:</b> ${c.objective}</div>`:''}
-    ${(c.startDate||c.endDate)?`<div class="modal-meta"><b>Activity:</b> ${c.startDate||'?'} &ndash; ${c.endDate||'?'}</div>`:''}
-    ${c.comments?`<div class="modal-meta"><b>Comments:</b> ${c.comments}</div>`:''}
+    ${c.campaignId?`<div class="modal-meta"><b>Campaign ID:</b> ${escapeHtml(c.campaignId)}</div>`:''}
+    ${c.theme?`<div class="modal-meta"><b>Theme:</b> ${escapeHtml(c.theme)}</div>`:''}
+    ${c.objective?`<div class="modal-meta"><b>Objective:</b> ${escapeHtml(c.objective)}</div>`:''}
+    ${(c.startDate||c.endDate)?`<div class="modal-meta"><b>Activity:</b> ${escapeHtml(c.startDate)||'?'} &ndash; ${escapeHtml(c.endDate)||'?'}</div>`:''}
+    ${c.comments?`<div class="modal-meta"><b>Comments:</b> ${escapeHtml(c.comments)}</div>`:''}
     <div class="modal-section-title">Total by year</div>
     <table class="modal-table"><thead><tr><th style="text-align:left">Year</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead>
     <tbody>${totalRows || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">No data</td></tr>'}</tbody></table>
@@ -1452,11 +1452,11 @@ function groupModalHTML(dimLabel, value, rows){
   const totalCommit = rows.reduce((s,r)=>s+(r.commit||0),0);
   const body = rows.map((r,i)=>`
     <tr class="clickable" data-idx="${i}">
-      <td style="text-align:left">${r.name}</td>
+      <td style="text-align:left">${escapeHtml(r.name)}</td>
       <td>${fmtMoney(r.plan,false)}</td><td>${fmtMoney(r.forecast,false)}</td><td>${fmtMoney(r.commit,false)}</td>
     </tr>`).join('');
   return `
-    <div class="modal-title">${dimLabel}: ${value}</div>
+    <div class="modal-title">${escapeHtml(dimLabel)}: ${escapeHtml(value)}</div>
     <div class="modal-meta">${rows.length} campaign${rows.length===1?'':'s'} &middot; ${periodRangeLabel()}</div>
     <div class="modal-section-title">Total</div>
     <table class="modal-table"><thead><tr><th style="text-align:left">&nbsp;</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead>
@@ -1550,8 +1550,8 @@ function renderCampaignSearchResults(query){
   el.innerHTML = matches.length
     ? matches.map((c,i)=>`
         <div class="search-result-item" data-idx="${i}">
-          <div class="sr-name">${c.campaign}</div>
-          <div class="sr-meta">${c.team} &middot; ${c.subTeam} &middot; ${c.region}${(()=>{ const tags=[...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))]; return tags.length ? ' &middot; '+tags.join(', ') : ''; })()}</div>
+          <div class="sr-name">${escapeHtml(c.campaign)}</div>
+          <div class="sr-meta">${escapeHtml(c.team)} &middot; ${escapeHtml(c.subTeam)} &middot; ${escapeHtml(c.region)}${(()=>{ const tags=[...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))]; return tags.length ? ' &middot; '+escapeHtml(tags.join(', ')) : ''; })()}</div>
         </div>
       `).join('')
     : '<div class="search-empty">No campaigns match that search</div>';
@@ -1584,7 +1584,7 @@ function renderBreakdown(containerId, campaigns, key, months, metric, dimLabel){
   if (!entries.length){ el.innerHTML = '<div class="empty-note">No spend in current filter</div>'; return; }
   el.innerHTML = entries.map(([k,v])=>`
     <div class="bar-row clickable">
-      <div class="lbl" title="${k}">${k}</div>
+      <div class="lbl" title="${escapeHtml(k)}">${escapeHtml(k)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${(v/max*100).toFixed(1)}%"></div></div>
       <div class="val">${fmtMoney(v)}</div>
     </div>
@@ -1633,7 +1633,7 @@ function renderStackedFromGroups(containerId, groups, dimLabel, months, matchFn)
   const legend = entries.map(([k,v])=>
     `<div class="legend-row${k==='Other'?'':' clickable'}" data-k="${escapeHtml(k)}">
       <span class="swatch" style="background:${colorFor(k)}"></span>
-      <span class="lbl" title="${k}">${k}</span>
+      <span class="lbl" title="${escapeHtml(k)}">${escapeHtml(k)}</span>
       <span class="val">${fmtMoney(v)} &middot; ${(v/total*100).toFixed(0)}%</span>
     </div>`
   ).join('');
@@ -1681,7 +1681,7 @@ function renderLineBreakdown(campaigns, months, metric, linesKey, nameField, con
   if (!entries.length){ el.innerHTML = '<div class="empty-note">No spend in current filter</div>'; return; }
   el.innerHTML = entries.map(([k,v])=>`
     <div class="bar-row clickable">
-      <div class="lbl" title="${k}">${k}</div>
+      <div class="lbl" title="${escapeHtml(k)}">${escapeHtml(k)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${(v/max*100).toFixed(1)}%${colorVar?`;background:${colorVar}`:''}"></div></div>
       <div class="val">${fmtMoney(v)}</div>
     </div>
@@ -1730,7 +1730,7 @@ function renderTopCampaigns(campaigns, months){
   if (!rows.length){ el.innerHTML='<div class="empty-note">No spend in current filter</div>'; return; }
   el.innerHTML = rows.map(r=>`
     <div class="bar-row clickable" style="grid-template-columns:170px 1fr 76px">
-      <div class="lbl" title="${r.c.campaign}">${r.c.campaign}</div>
+      <div class="lbl" title="${escapeHtml(r.c.campaign)}">${escapeHtml(r.c.campaign)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${(r.spend/max*100).toFixed(1)}%;background:var(--series-3)"></div></div>
       <div class="val">${fmtMoney(r.spend)}</div>
     </div>
@@ -1849,15 +1849,15 @@ function campaignRowHTML(c){
   }).join('');
   const tacticTags = [...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))];
   return `<tr class="row-campaign clickable" data-role="campaign">
-    <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle"></span><span class="hier-name" title="${c.campaign}">${c.campaign}</span></div></td>
-    <td class="hier-meta-col">${c.campaignId||'—'}</td>
-    <td class="hier-meta-col">${c.product||'—'}</td>
-    <td class="hier-meta-col">${tacticTags.length ? tacticTags.join(', ') : '—'}</td>
-    <td class="hier-meta-col">${c.region}</td>
-    <td class="hier-meta-col">${c.campaignType||'—'}</td>
-    <td class="hier-meta-col">${c.subCampaignType||'—'}</td>
+    <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle"></span><span class="hier-name" title="${escapeHtml(c.campaign)}">${escapeHtml(c.campaign)}</span></div></td>
+    <td class="hier-meta-col">${escapeHtml(c.campaignId)||'—'}</td>
+    <td class="hier-meta-col">${escapeHtml(c.product)||'—'}</td>
+    <td class="hier-meta-col">${tacticTags.length ? escapeHtml(tacticTags.join(', ')) : '—'}</td>
+    <td class="hier-meta-col">${escapeHtml(c.region)}</td>
+    <td class="hier-meta-col">${escapeHtml(c.campaignType)||'—'}</td>
+    <td class="hier-meta-col">${escapeHtml(c.subCampaignType)||'—'}</td>
     ${cells}
-    <td class="hier-comment-col" title="${(c.comments||'').replace(/"/g,'&quot;')}">${c.comments||'—'}</td>
+    <td class="hier-comment-col" title="${escapeHtml(c.comments)}">${escapeHtml(c.comments)||'—'}</td>
   </tr>`;
 }
 
@@ -1884,7 +1884,7 @@ function aggregateRowHTML(label, campaigns, level, expanded, key){
   }).join('');
   const cls = level===0 ? 'row-team' : 'row-subteam';
   return `<tr class="${cls}" data-role="${cls}" data-key="${key}">
-    <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle">${expanded?'▾':'▸'}</span><span class="hier-name">${label}</span></div></td>
+    <td class="sticky-col"><div class="hier-cell"><span class="tree-toggle">${expanded?'▾':'▸'}</span><span class="hier-name">${escapeHtml(label)}</span></div></td>
     <td class="hier-meta-col">&nbsp;</td>
     <td class="hier-meta-col">&nbsp;</td><td class="hier-meta-col">&nbsp;</td><td class="hier-meta-col">${campaigns.length} campaign${campaigns.length===1?'':'s'}</td>
     <td class="hier-meta-col">&nbsp;</td><td class="hier-meta-col">&nbsp;</td>
