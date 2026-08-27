@@ -2085,6 +2085,16 @@ function subTeamsForTeam(team){
   return [...set].sort();
 }
 
+// CampaignType/SubCampaignType options come from the same taxonomy the bulk
+// importer validates against (IMPORT_CAMPAIGN_TYPE_SUBTYPES), not from
+// whatever's already in ENTRY_CAMPAIGNS - unlike Region/Product, an empty
+// campaign list shouldn't mean an empty dropdown here.
+function subCampaignTypesForType(ctype){
+  const set = new Set(IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype] || []);
+  ENTRY_CAMPAIGNS.filter(c=>c.campaignType===ctype && c.subCampaignType).forEach(c=> set.add(c.subCampaignType));
+  return [...set].sort();
+}
+
 async function addTeam(name){
   name = (name||'').trim();
   if (!name) return;
@@ -2812,9 +2822,12 @@ function renderComputedTotals(){
 
 function entryCampaignFormHTML(c, isEdit){
   const initialTeam = c ? c.team : (entryState.teams[0] || '');
+  const initialCampaignType = c ? (c.campaignType||'') : '';
   const regionOptions = uniqueVals('region', 'All');
-  const campaignTypeOptions = uniqueVals('campaignType', 'All');
-  const subCampaignTypeOptions = uniqueVals('subCampaignType', 'All');
+  const campaignTypeOptions = Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES);
+  const subCampaignTypeOptions = initialCampaignType
+    ? subCampaignTypesForType(initialCampaignType)
+    : [...new Set(Object.values(IMPORT_CAMPAIGN_TYPE_SUBTYPES).flat())].sort();
   const productOptions = uniqueProductVals('All');
   const selectedProducts = c ? (c.products||[]) : [];
 
@@ -2918,6 +2931,10 @@ function wireCampaignForm(existingId){
   document.getElementById('ef-team').onchange = (e)=>{
     const subTeamSelect = document.getElementById('ef-subTeam');
     subTeamSelect.outerHTML = creatableSelectHTML('ef-subTeam', '', subTeamsForTeam(e.target.value));
+  };
+  document.getElementById('ef-campaignType').onchange = (e)=>{
+    const subCampaignTypeSelect = document.getElementById('ef-subCampaignType');
+    subCampaignTypeSelect.outerHTML = creatableSelectHTML('ef-subCampaignType', '', subCampaignTypesForType(e.target.value));
   };
   document.getElementById('ef-cancelBtn').onclick = closeModal;
   document.getElementById('ef-previewBtn').onclick = ()=> previewCampaignFromForm(existingId);
@@ -3173,6 +3190,20 @@ function importCanon(map, v){
   return map.get(v.toLowerCase()) || v;  // unrecognized values pass through untouched, so validation still flags them
 }
 
+// The importer reads uploaded cells with raw:false (so date cells come
+// through as readable "2026-07-01" strings, not Excel serial numbers) - but
+// that same setting formats currency/thousands-styled numeric cells into
+// their display text too, e.g. a cell holding the number 44837 with a
+// "$#,##0.00" format arrives here as the string "$44,837.00", and
+// parseFloat("$44,837.00") is NaN since it starts with "$". Strip everything
+// but digits/minus/decimal point before parsing so formatted-currency cells
+// still parse as plain numbers.
+function parseImportNumber(v){
+  if (v===null || v===undefined || v==='') return NaN;
+  const cleaned = String(v).replace(/[^0-9.\-]/g, '');
+  return cleaned==='' ? NaN : parseFloat(cleaned);
+}
+
 function normalizeImportRow(obj){
   const out = {};
   Object.keys(obj||{}).forEach(k=>{
@@ -3344,7 +3375,7 @@ function buildLinesFromGroup(lineRows, type, existingLines){
       let any = false;
       CSV_METRICS.forEach(met=>{
         const raw = row[`${m} ${CSV_METRIC_LABELS[met]}`];
-        const val = (raw!=null && raw!=='') ? parseFloat(raw) : null;
+        const val = (raw!=null && raw!=='') ? parseImportNumber(raw) : null;
         v[met] = val;
         if (val!=null) any = true;
       });
@@ -3372,7 +3403,7 @@ function importGroupToPayload(g, existing){
     comments: cRow.Comments || (existing ? existing.comments : null),
     startDate: cRow.StartDate || (existing ? existing.startDate : null),
     endDate: cRow.EndDate || (existing ? existing.endDate : null),
-    convRate: cRow.ConvRate ? parseFloat(cRow.ConvRate) : (existing ? existing.convRate : null),
+    convRate: cRow.ConvRate ? parseImportNumber(cRow.ConvRate) : (existing ? existing.convRate : null),
     assetLines: buildLinesFromGroup(g.lineRows, 'Asset', existing ? existing.assetLines : []),
     tacticLines: buildLinesFromGroup(g.lineRows, 'Tactic', existing ? existing.tacticLines : []),
   };
@@ -3396,7 +3427,7 @@ function validateImportGroups(rows){
     if (cRow.Action && !['create','update','delete'].includes(action)) errors.push('Action must be Create, Update, or Delete (or blank)');
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
     if (cRow.Team && entryState.teams.length && !entryState.teams.includes(cRow.Team)) errors.push(`Team must be one of: ${entryState.teams.join(', ')}`);
-    if (cRow.ConvRate && isNaN(parseFloat(cRow.ConvRate))) errors.push('ConvRate is not a number');
+    if (cRow.ConvRate && isNaN(parseImportNumber(cRow.ConvRate))) errors.push('ConvRate is not a number');
     const ctype = (cRow.CampaignType||'').trim();
     const stype = (cRow.SubCampaignType||'').trim();
     if (ctype && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype]) errors.push(`CampaignType must be one of: ${Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES).join(', ')}`);
@@ -3417,7 +3448,7 @@ function validateImportGroups(rows){
       MONTHS.forEach(m=> CSV_METRICS.forEach(met=>{
         const key = `${m} ${CSV_METRIC_LABELS[met]}`;
         const v = row[key];
-        if (v && isNaN(parseFloat(v))) errors.push(`L${index}: "${key}" is not a number`);
+        if (v && isNaN(parseImportNumber(v))) errors.push(`L${index}: "${key}" is not a number`);
       }));
     });
     return {...g, action, errors};
