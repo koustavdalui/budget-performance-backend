@@ -274,6 +274,8 @@ tr.row-campaign:hover td{background:var(--page);}
 .import-review-row:last-child{border-bottom:none;}
 .import-review-row.valid{background:rgba(12,163,12,0.06);}
 .import-review-row.invalid{background:rgba(208,59,59,0.07);}
+.import-review-row.warn{background:rgba(214,158,46,0.1);}
+.import-warn-tag{color:#9a6b12;font-weight:650;}
 .import-action-badge{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:10px;background:var(--page);color:var(--text-secondary);flex-shrink:0;white-space:nowrap;}
 .tablecard{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
 .datahead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
@@ -3417,9 +3419,10 @@ function validateImportGroups(rows){
   const teamCanon = buildCaseInsensitiveIndex(entryState.teams);
   const results = groups.map(g=>{
     const errors = [];
+    const warnings = [];
     if (!g.campaignRow){
       errors.push('No Type=Campaign row found for this Campaign name');
-      return {...g, action: 'update', errors};
+      return {...g, action: 'update', errors, warnings};
     }
     const cRow = g.campaignRow;
     if (cRow.Team) cRow.Team = importCanon(teamCanon, cRow.Team);
@@ -3428,22 +3431,27 @@ function validateImportGroups(rows){
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
     if (cRow.Team && entryState.teams.length && !entryState.teams.includes(cRow.Team)) errors.push(`Team must be one of: ${entryState.teams.join(', ')}`);
     if (cRow.ConvRate && isNaN(parseImportNumber(cRow.ConvRate))) errors.push('ConvRate is not a number');
+    // CampaignType/SubCampaignType/LineName not matching the current taxonomy is
+    // a warning, not a blocking error - same spirit as the manual entry form's
+    // "+ Add new..." option on these same fields. The row still imports as
+    // typed; a human reviews the flagged "new" values afterward and decides
+    // whether to add them to the taxonomy for next time.
     const ctype = (cRow.CampaignType||'').trim();
     const stype = (cRow.SubCampaignType||'').trim();
-    if (ctype && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype]) errors.push(`CampaignType must be one of: ${Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES).join(', ')}`);
+    if (ctype && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype]) warnings.push(`New CampaignType "${ctype}" (not in the current list)`);
     if (stype){
       if (ctype && IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype] && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype].includes(stype)){
-        errors.push(`SubCampaignType "${stype}" is not valid for CampaignType "${ctype}"`);
+        warnings.push(`New SubCampaignType "${stype}" for CampaignType "${ctype}" (not paired before)`);
       } else if (!ctype){
         const known = Object.values(IMPORT_CAMPAIGN_TYPE_SUBTYPES).some(list=>list.includes(stype));
-        if (!known) errors.push(`Unknown SubCampaignType "${stype}"`);
+        if (!known) warnings.push(`New SubCampaignType "${stype}" (not in the current list)`);
       }
     }
     g.lineRows.forEach(({row, index, type})=>{
       if (!['Asset','Tactic'].includes(type)) errors.push(`L${index}: Type must be Asset, Tactic, or Campaign`);
       if (!row.LineName) errors.push(`L${index}: Missing LineName`);
-      if (type==='Asset' && row.LineName && !IMPORT_ASSET_LINE_NAMES.includes(row.LineName)) errors.push(`L${index}: LineName is not in the Asset list`);
-      if (type==='Tactic' && row.LineName && !IMPORT_TACTIC_LINE_NAMES.includes(row.LineName)) errors.push(`L${index}: LineName is not in the Tactic list`);
+      if (type==='Asset' && row.LineName && !IMPORT_ASSET_LINE_NAMES.includes(row.LineName)) warnings.push(`L${index}: New Asset "${row.LineName}" (not in the current list)`);
+      if (type==='Tactic' && row.LineName && !IMPORT_TACTIC_LINE_NAMES.includes(row.LineName)) warnings.push(`L${index}: New Tactic "${row.LineName}" (not in the current list)`);
       if (row.Year && !/^\d{4}$/.test(row.Year.trim())) errors.push(`L${index}: Year must be a 4-digit year`);
       MONTHS.forEach(m=> CSV_METRICS.forEach(met=>{
         const key = `${m} ${CSV_METRIC_LABELS[met]}`;
@@ -3451,12 +3459,12 @@ function validateImportGroups(rows){
         if (v && isNaN(parseImportNumber(v))) errors.push(`L${index}: "${key}" is not a number`);
       }));
     });
-    return {...g, action, errors};
+    return {...g, action, errors, warnings};
   });
   if (unassigned.length){
     results.push({
       campaign: '(no Campaign name)', campaignRow: null, lineRows: unassigned,
-      firstIndex: unassigned[0].index, action: 'update',
+      firstIndex: unassigned[0].index, action: 'update', warnings: [],
       errors: unassigned.map(({index})=>
         `L${index}: this row has a Type/LineName/$ but no Campaign name, so it can't be linked to any campaign and its data would be lost - fill in Campaign to match the campaign row above it`
       ),
@@ -3553,17 +3561,21 @@ function openImportModal(){
 
 function renderImportReview(){
   const validCount = importParsedGroups.filter(g=>g.errors.length===0).length;
+  const warnCount = importParsedGroups.filter(g=>g.errors.length===0 && (g.warnings||[]).length).length;
   document.getElementById('importReviewContainer').innerHTML = `
-    <div style="font-weight:650;font-size:13px;margin:10px 0 8px;">${validCount} of ${importParsedGroups.length} campaigns valid</div>
+    <div style="font-weight:650;font-size:13px;margin:10px 0 8px;">${validCount} of ${importParsedGroups.length} campaigns valid${warnCount?` (${warnCount} with new Asset/Tactic/CampaignType values - review below, they'll still import)`:''}</div>
     <div class="import-review">
       ${importParsedGroups.map(g=>{
         const lineCount = g.lineRows.length;
+        const warnings = g.warnings||[];
+        const rowClass = g.errors.length ? 'invalid' : (warnings.length ? 'warn' : 'valid');
         return `
-        <div class="import-review-row ${g.errors.length?'invalid':'valid'}">
+        <div class="import-review-row ${rowClass}">
           <span class="import-action-badge">${g.action}</span>
           <span>L${g.firstIndex}: ${escapeHtml(g.campaign)}${g.campaignRow?' &mdash; '+escapeHtml(g.campaignRow.Team||'?'):''}
             ${lineCount?` &mdash; ${lineCount} asset/tactic row${lineCount!==1?'s':''}`:''}
-            ${g.errors.length?' &mdash; '+escapeHtml(g.errors.join('; ')):''}</span>
+            ${g.errors.length?' &mdash; '+escapeHtml(g.errors.join('; ')):''}
+            ${warnings.length?` &mdash; <span class="import-warn-tag">NEW:</span> `+escapeHtml(warnings.join('; ')):''}</span>
         </div>`;
       }).join('')}
     </div>
@@ -3578,6 +3590,12 @@ function renderImportReview(){
 
 async function confirmImport(){
   const valid = importParsedGroups.filter(g=>g.errors.length===0);
+  // Collects the distinct "NEW ..." warning text (minus the L#: prefix) across
+  // every imported group, so the completion message doubles as a punch list
+  // of what to review for adding to the taxonomy - the data is already in by
+  // the time this shows, nothing is blocked on it.
+  const newValueSet = new Set();
+  valid.forEach(g=> (g.warnings||[]).forEach(w=> newValueSet.add(w.replace(/^L\d+:\s*/,''))));
   let created=0, updated=0, deleted=0, notFound=0;
   for (const g of valid){
     const cRow = g.campaignRow;
@@ -3599,7 +3617,10 @@ async function confirmImport(){
   await refreshCampaignsFromBackend();
   document.getElementById('importOverlay').classList.remove('open');
   importParsedGroups = null;
-  alert(`Import complete: ${created} created, ${updated} updated, ${deleted} deleted${notFound?`, ${notFound} not found (skipped)`:''}.`);
+  const newValuesNote = newValueSet.size
+    ? `\n\nNew values imported as-is (not yet in the taxonomy list):\n- ${[...newValueSet].join('\n- ')}`
+    : '';
+  alert(`Import complete: ${created} created, ${updated} updated, ${deleted} deleted${notFound?`, ${notFound} not found (skipped)`:''}.${newValuesNote}`);
 }
 
 document.getElementById('expandTeamsBtn').onclick = openAllTeamsModal;
