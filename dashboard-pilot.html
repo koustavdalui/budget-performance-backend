@@ -2890,13 +2890,13 @@ function renderComputedTotals(){
 function entryCampaignFormHTML(c, isEdit){
   const initialTeam = c ? c.team : (entryState.teams[0] || '');
   const initialCampaignType = c ? (c.campaignType||'') : '';
-  const regionOptions = uniqueVals('region', 'All');
+  const regionOptions = uniqueVals('region', []);
   const campaignTypeOptions = Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES);
   const subCampaignTypeOptions = initialCampaignType
     ? subCampaignTypesForType(initialCampaignType)
     : [...new Set(Object.values(IMPORT_CAMPAIGN_TYPE_SUBTYPES).flat())].sort();
-  const productOptions = uniqueProductVals('All');
   const selectedProducts = c ? (c.products||[]) : [];
+  const productOptions = [...new Set([...uniqueProductVals([]), ...selectedProducts])].sort();
 
   return `
     <div class="modal-title">${isEdit?'Edit Campaign':'Add Campaign'}</div>
