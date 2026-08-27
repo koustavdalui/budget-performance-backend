@@ -2371,6 +2371,18 @@ function downloadBudgetTemplate(){
   downloadTextFile('team-budgets-import-template.csv', [BUDGET_CSV_COLS.join(','), ...sample.map(r=>budgetCsvEscapeRow(r).join(','))].join('\n'));
 }
 
+async function readBudgetImportFileAsCsv(file){
+  const name = (file.name||'').toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls') || file.type.includes('spreadsheet')){
+    await loadXlsxLib();
+    const buf = await file.arrayBuffer();
+    const wb = window.XLSX.read(buf, {type:'array'});
+    const sheetName = wb.SheetNames.find(n=> n==='Budgets') || wb.SheetNames[0];
+    return window.XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+  }
+  return await file.text();
+}
+
 function parseBudgetImportRows(rows){
   if (!rows.length) return [];
   const first = rows[0];
@@ -2445,9 +2457,10 @@ function openBudgetImportModal(){
       all four quarters for that team+year; the team stays registered).
       A team that isn't in the registry yet is created by the import.
       Long format (<b>Team, Year, Quarter, Amount</b>) is also accepted.
+      Upload a filled <b>.xlsx</b> or a CSV export &mdash; same columns either way.
     </div>
     <div class="modal-actions-row" style="border-top:none;padding-top:0;margin-top:0;">
-      <label class="reset-btn" style="cursor:pointer;">Upload CSV<input type="file" accept=".csv,text/csv" id="budgetImportFileInput" hidden></label>
+      <label class="reset-btn" style="cursor:pointer;">Upload file<input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" id="budgetImportFileInput" hidden></label>
       <button class="reset-btn" id="budgetImportTemplateBtn2">Download template</button>
     </div>
     <textarea class="import-textarea" id="budgetImportTextarea" placeholder="Team,Year,Q1,Q2,Q3,Q4,Action"></textarea>
@@ -2457,11 +2470,14 @@ function openBudgetImportModal(){
     </div>
     <div id="budgetImportReviewContainer"></div>
   `;
-  document.getElementById('budgetImportFileInput').onchange = (e)=>{
+  document.getElementById('budgetImportFileInput').onchange = async (e)=>{
     const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt)=>{ document.getElementById('budgetImportTextarea').value = evt.target.result; };
-    reader.readAsText(file);
+    try{
+      const text = await readBudgetImportFileAsCsv(file);
+      document.getElementById('budgetImportTextarea').value = text;
+    } catch(err){
+      alert('Could not read that file: '+(err.message||err));
+    }
   };
   document.getElementById('budgetImportTemplateBtn2').onclick = downloadBudgetTemplate;
   document.getElementById('budgetImportValidateBtn').onclick = ()=>{
