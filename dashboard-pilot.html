@@ -2388,9 +2388,13 @@ function parseBudgetImportRows(rows){
   const first = rows[0];
   const isLong = csvHasCol(first, 'Quarter');
   const seen = new Set();
+  // entryState.teams is loaded live, not a static list, so this index is
+  // rebuilt per parse rather than as a module-level constant (same pattern
+  // as the campaign importer's Team canonicalization).
+  const teamCanon = buildCaseInsensitiveIndex(entryState.teams);
   return rows.map((raw, i)=>{
     const line = i+2;
-    const team = csvCell(raw, 'Team');
+    const team = importCanon(teamCanon, csvCell(raw, 'Team'));
     const yearRaw = csvCell(raw, 'Year');
     const actionRaw = csvCell(raw, 'Action');
     const action = (actionRaw||'update').toLowerCase();
@@ -2407,8 +2411,8 @@ function parseBudgetImportRows(rows){
     const addQuarter = (q, rawAmt, required)=>{
       const amt = (rawAmt==null) ? '' : String(rawAmt).trim();
       if (amt==='' && !required && action!=='delete') return;
-      if (amt!=='' && isNaN(parseFloat(amt))){ errors.push(`${q} is not a number`); return; }
-      const amount = amt==='' ? null : parseFloat(amt);
+      if (amt!=='' && isNaN(parseImportNumber(amt))){ errors.push(`${q} is not a number`); return; }
+      const amount = amt==='' ? null : parseImportNumber(amt);
       quarterAmounts[q] = amount;
       payloads.push({team, year, quarter:q, amount, action: action==='delete' ? 'delete' : 'update'});
     };
