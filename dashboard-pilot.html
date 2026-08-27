@@ -3355,6 +3355,15 @@ function downloadCampaignImportCsvFallback(){
 // row, not just the first one for each campaign - so those get collected
 // separately (`unassigned`) instead of silently vanishing, and
 // validateImportGroups surfaces them as an explicit error.
+// True if any of the 48 month/metric cells on this row has a value - used to
+// tell a real spend line apart from an empty placeholder row.
+function rowHasMoney(row){
+  return MONTHS.some(m=> CSV_METRICS.some(met=>{
+    const v = row[`${m} ${CSV_METRIC_LABELS[met]}`];
+    return v!=null && v!=='';
+  }));
+}
+
 function groupImportRows(rows){
   const groups = [];
   const byName = new Map();
@@ -3368,8 +3377,12 @@ function groupImportRows(rows){
     }
     let g = byName.get(name);
     if (!g){ g = {campaign: name, campaignRow: null, lineRows: [], firstIndex: i+2}; byName.set(name, g); groups.push(g); }
-    if (type==='Campaign') g.campaignRow = row;
-    else g.lineRows.push({row, index: i+2, type});
+    if (type==='Campaign'){ g.campaignRow = row; return; }
+    // A placeholder Asset/Tactic row - no LineName and no $ anywhere - carries
+    // no actual data (someone left an unused template row in place). Drop it
+    // silently rather than forcing a LineName onto a row that was never used.
+    if (['Asset','Tactic'].includes(type) && !row.LineName && !rowHasMoney(row)) return;
+    g.lineRows.push({row, index: i+2, type});
   });
   return {groups, unassigned};
 }
