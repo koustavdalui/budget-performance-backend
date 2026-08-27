@@ -1206,8 +1206,10 @@ function trendBucketData(campaigns, buckets){
 // Grouped bar chart: one group of bars per bucket, one bar per entry in
 // opts.seriesList (defaults to Plan/Forecast/Commit - pass a longer list,
 // e.g. [BUDGET_SERIES, ...TREND_SERIES], to add a Budget bar in front).
-// opts.sharedMax lets two side-by-side charts (team-split mode) use the same
-// y-scale so their bar heights stay directly comparable.
+// Each chart scales to its own data - team-split views (sidebar panel, "All
+// Teams" popup) intentionally do NOT share one y-axis across teams, since a
+// scale sized to the biggest team flattened every smaller team's bars to
+// near-invisible slivers.
 // Budget is drawn as a dashed target-line across each bucket's bar group,
 // not as a 4th bar - it's conceptually a threshold/target to plan against,
 // not a comparable spend figure, and a bar would frequently be invisible
@@ -1223,7 +1225,7 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
   const w=560, h=opts.showLabels?244:220, padL=54, padR=16, padT=opts.showLabels?26:16, padB=28;
   const allVals = data.flat().filter(v=>v!==null);
   const targetVals = (targetData||[]).filter(v=>v!==null);
-  const maxV = Math.max(1, ...allVals, ...targetVals, opts.sharedMax||0);
+  const maxV = Math.max(1, ...allVals, ...targetVals);
   const niceMax = (()=>{ const mag=Math.pow(10,Math.floor(Math.log10(maxV||1))); const step=mag/2||1; return Math.ceil(maxV/step)*step; })();
   const y = v => padT + (1 - v/niceMax)*(h-padT-padB);
   const baseline = y(0);
@@ -1332,10 +1334,12 @@ function renderTrend(campaigns){
       const budgetRow = budgetBucketRow(buckets, [t], isQuarterly);
       return budgetRow ? [budgetRow, ...base] : base;
     });
-    const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null));
     document.getElementById('trendTeamsPanel').innerHTML =
       teams.map((t,i)=>`<div class="trend-split-panel"><h4>${escapeHtml(t)}</h4><div id="trendChartTeam${i}"></div></div>`).join('');
-    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, seriesList}));
+    // Independent y-axis per team, same as the "All Teams" expand popup - a
+    // shared scale sized to the biggest team flattened every smaller team's
+    // bars to near-invisible slivers.
+    teams.forEach((t,i)=> renderGroupedBarChart('trendChartTeam'+i, buckets, perTeamData[i], {seriesList, showLabels:true}));
   } else {
     teamsCard.style.display = 'none';
   }
