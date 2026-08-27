@@ -91,8 +91,8 @@ body{margin:0;background:var(--page);color:var(--text-primary);font-family:syste
 .trend-teams-card{max-height:340px;overflow-y:auto;}
 .trend-teams-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .trend-teams-header .reset-btn{white-space:nowrap;}
-.all-teams-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
-@media (max-width:700px){ .all-teams-grid{grid-template-columns:1fr;} }
+.all-teams-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:28px;}
+@media (max-width:900px){ .all-teams-grid{grid-template-columns:1fr;} }
 .trend-split{display:grid;grid-template-columns:1fr;gap:18px;}
 .trend-split-panel h4{font-size:13px;font-weight:650;margin:0 0 6px;color:var(--text-secondary);}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
@@ -270,6 +270,7 @@ tr.row-campaign:hover td{background:var(--page);}
 .asset-line-block{border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:10px;position:relative;}
 .asset-line-block .remove-line-btn{position:absolute;top:10px;right:10px;}
 .modal-box.wide{max-width:840px;}
+.modal-box.xwide{max-width:min(1440px,94vw);max-height:90vh;}
 .modal-actions-row{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--grid);}
 
 /* CSV import review */
@@ -1219,7 +1220,7 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
   const el = document.getElementById(elId);
   const seriesList = opts.seriesList || TREND_SERIES;
   const targetData = opts.targetData || null;
-  const w=560, h=220, padL=54, padR=16, padT=16, padB=28;
+  const w=560, h=opts.showLabels?244:220, padL=54, padR=16, padT=opts.showLabels?26:16, padB=28;
   const allVals = data.flat().filter(v=>v!==null);
   const targetVals = (targetData||[]).filter(v=>v!==null);
   const maxV = Math.max(1, ...allVals, ...targetVals, opts.sharedMax||0);
@@ -1247,7 +1248,7 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
     xticks += `<text x="${cx}" y="${h-padB+16}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${b.label}</text>`;
   });
 
-  let bars='', targets='';
+  let bars='', targets='', labels='';
   buckets.forEach((b,bi)=>{
     const groupX = padL + bi*bandW + (bandW-groupWidth)/2;
     seriesList.forEach((s,si)=>{
@@ -1257,6 +1258,11 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
       const by = y(v);
       const bh = Math.max(0, baseline-by);
       bars += `<rect class="bar" data-si="${si}" data-bi="${bi}" x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="${s.color}" style="cursor:pointer"/>`;
+      if (opts.showLabels && v!==0){
+        const lx = bx + barW/2;
+        const ly = Math.max(by-4, 10);
+        labels += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--text-secondary)">${fmtMoney(v)}</text>`;
+      }
     });
     if (targetData && targetData[bi]!=null){
       const ty = y(targetData[bi]);
@@ -1265,7 +1271,7 @@ function renderGroupedBarChart(elId, buckets, data, opts={}){
   });
 
   el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" style="overflow:visible;display:block">
-      ${gridLines}${ticks}<line x1="${padL}" y1="${baseline}" x2="${w-padR}" y2="${baseline}" stroke="var(--baseline)" stroke-width="1"/>${xticks}${bars}${targets}
+      ${gridLines}${ticks}<line x1="${padL}" y1="${baseline}" x2="${w-padR}" y2="${baseline}" stroke="var(--baseline)" stroke-width="1"/>${xticks}${bars}${targets}${labels}
     </svg>
     <div class="legend">${seriesList.map(s=>`<span class="lg"><span class="sw" style="background:${s.color}"></span>${s.name}</span>`).join('')}${targetData?`<span class="lg"><span class="sw-line" style="border-top-color:${BUDGET_SERIES.color};border-top-style:dashed;"></span>${BUDGET_SERIES.name} (target)</span>`:''}</div>`;
 
@@ -1351,9 +1357,8 @@ function openAllTeamsModal(){
     const budgetRow = budgetBucketRow(buckets, [t], isQuarterly);
     return budgetRow ? [budgetRow, ...base] : base;
   });
-  const teamSharedMax = Math.max(1, ...perTeamData.flatMap(d=>d.flat()).filter(v=>v!==null));
 
-  document.getElementById('modalBox').classList.add('wide');
+  document.getElementById('modalBox').classList.add('xwide');
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-title">All Teams &mdash; Plan vs Forecast vs Commit${isQuarterly?' + Budget':''}</div>
     <div class="all-teams-grid">
@@ -1361,7 +1366,10 @@ function openAllTeamsModal(){
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
-  teams.forEach((t,i)=> renderGroupedBarChart('allTeamsChart'+i, buckets, perTeamData[i], {sharedMax: teamSharedMax, seriesList}));
+  // Each team gets its own y-axis scale here (unlike the sidebar panel, which
+  // shares one scale on purpose for at-a-glance size comparison) - this view
+  // is for reading one team's numbers clearly, not comparing magnitudes.
+  teams.forEach((t,i)=> renderGroupedBarChart('allTeamsChart'+i, buckets, perTeamData[i], {seriesList, showLabels:true}));
 }
 
 // ---------- detail modal ----------
@@ -1455,7 +1463,7 @@ function groupModalHTML(dimLabel, value, rows){
 }
 
 function openCampaignModal(c){
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   document.getElementById('modalContent').innerHTML = campaignModalHTML(c);
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -1490,7 +1498,7 @@ function openGroupModal(dimLabel, value, groupCampaigns, months, assetScopeName,
     return {name, plan, forecast, commit, c};
   }).filter(r=>r.plan||r.forecast||r.commit).sort((a,b)=>(b.commit||b.plan||0)-(a.commit||a.plan||0));
 
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   document.getElementById('modalContent').innerHTML = groupModalHTML(dimLabel, value, rows);
   document.getElementById('modalOverlay').classList.add('open');
   document.querySelectorAll('#modalContent tr.clickable').forEach(tr=>{
@@ -1505,7 +1513,7 @@ const METRIC_DEFS = [
   {term:'Commit', def:'Actual spend, tracked via Purchase Orders.'},
 ];
 function openMetricDefsModal(){
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   document.getElementById('modalContent').innerHTML = `
     <h3>Metric definitions</h3>
     <div class="metric-defs-list">
@@ -1517,7 +1525,7 @@ function openMetricDefsModal(){
 
 function closeModal(){
   document.getElementById('modalOverlay').classList.remove('open');
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
 }
 document.getElementById('modalClose').onclick = closeModal;
 document.getElementById('modalOverlay').addEventListener('click', e=>{ if (e.target.id==='modalOverlay') closeModal(); });
@@ -2165,7 +2173,7 @@ async function deleteSubteamConfirm(team, subTeam){
 
 // ---------- Team / Sub Team modals ("Add Team"/"Add Sub Team" pop up, fill, save) ----------
 function openTeamModal(){
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-title">Add Team</div>
     <div class="entry-field full" style="margin-bottom:16px;">
@@ -2191,7 +2199,7 @@ function openTeamModal(){
 }
 
 function openSubteamModal(prefillTeam){
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   const teams = [...entryState.teams].sort();
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-title">Add Sub Team</div>
@@ -2302,7 +2310,7 @@ function renderBudgetRows(){
 // always opens blank - no team/year/amounts filled in - so it never looks
 // like you're overwriting an existing budget by accident.
 function openBudgetModal(prefillTeam){
-  document.getElementById('modalBox').classList.remove('wide');
+  document.getElementById('modalBox').classList.remove('wide', 'xwide');
   const isEdit = !!prefillTeam;
   const teams = [...entryState.teams].sort();
   const teamOptions = (isEdit ? '' : '<option value="">Select team</option>') +
