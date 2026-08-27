@@ -145,6 +145,11 @@ tr.clickable{cursor:pointer;}
 .modal-meta{font-size:13px;color:var(--text-secondary);margin-bottom:4px;}
 .modal-meta b{color:var(--text-primary);font-weight:600;}
 .modal-section-title{font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.02em;color:var(--text-muted);margin:18px 0 8px;}
+.modal-details{margin-bottom:4px;}
+.modal-details summary{list-style:none;}
+.modal-details summary::-webkit-details-marker{display:none;}
+.modal-details summary:before{content:'▸ ';display:inline-block;}
+.modal-details[open] summary:before{content:'▾ ';}
 .entry-section{border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:14px;background:var(--card);}
 .entry-section-title{font-size:14.5px;font-weight:700;color:var(--text-primary);margin:0 0 3px;padding-left:11px;border-left:3px solid var(--series-1);}
 .entry-section-caption{font-size:12px;color:var(--text-muted);margin:0 0 14px;padding-left:14px;}
@@ -474,6 +479,7 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
         <div class="datahead">
           <div class="datahead-left">
             <div style="font-weight:650;font-size:15px;padding-bottom:2px;">Campaigns</div>
+            <input class="search-input" id="entrySearch" placeholder="Search campaigns...">
             <div class="data-period">
               <label for="entryYearSelect">Year</label>
               <select id="entryYearSelect"></select>
@@ -1389,8 +1395,24 @@ function campaignModalHTML(c){
       })
     ).filter(Boolean).join('');
   }
+  // Same lines, but exploded one row per (line, year, month) instead of
+  // summed to a yearly total - the yearly table above answers "how much
+  // total," this answers "which month," without losing either view.
+  function lineMonthRowsForModal(lines, nameField){
+    return (lines||[]).flatMap(line=>
+      Object.keys(line.months||{}).sort().flatMap(y=>{
+        const ym = line.months[y]||{};
+        return MONTHS.filter(m=> ym[m] && (ym[m].plan!=null || ym[m].forecast!=null || ym[m].commit!=null)).map(m=>{
+          const v = ym[m];
+          return `<tr><td style="text-align:left">${line[nameField]}</td><td style="text-align:left">${y}</td><td style="text-align:left">${m}</td><td>${fmtMoney(v.plan,false)}</td><td>${fmtMoney(v.forecast,false)}</td><td>${fmtMoney(v.commit,false)}</td></tr>`;
+        });
+      })
+    ).join('');
+  }
   const assetRows = lineRowsForModal(c.assetLines, 'asset');
   const tacticRows = lineRowsForModal(c.tacticLines, 'tactic');
+  const assetMonthRows = lineMonthRowsForModal(c.assetLines, 'asset');
+  const tacticMonthRows = lineMonthRowsForModal(c.tacticLines, 'tactic');
   const tacticTags = [...new Set((c.tacticLines||[]).map(tl=>tl.tactic).filter(Boolean))];
   const badges = [c.team, c.subTeam, c.region, c.product, ...tacticTags, c.campaignType, c.subCampaignType].filter(Boolean).map(b=>`<span class="badge">${b}</span>`).join('');
   return `
@@ -1406,7 +1428,9 @@ function campaignModalHTML(c){
     <tbody>${totalRows || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">No data</td></tr>'}</tbody></table>
     ${monthTables}
     ${assetRows ? `<div class="modal-section-title">Asset breakdown</div><table class="modal-table"><thead><tr><th style="text-align:left">Asset</th><th style="text-align:left">Year</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead><tbody>${assetRows}</tbody></table>` : ''}
+    ${assetMonthRows ? `<details class="modal-details"><summary class="modal-section-title" style="cursor:pointer">Asset breakdown by month</summary><table class="modal-table"><thead><tr><th style="text-align:left">Asset</th><th style="text-align:left">Year</th><th style="text-align:left">Month</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead><tbody>${assetMonthRows}</tbody></table></details>` : ''}
     ${tacticRows ? `<div class="modal-section-title">Tactic breakdown</div><table class="modal-table"><thead><tr><th style="text-align:left">Tactic</th><th style="text-align:left">Year</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead><tbody>${tacticRows}</tbody></table>` : ''}
+    ${tacticMonthRows ? `<details class="modal-details"><summary class="modal-section-title" style="cursor:pointer">Tactic breakdown by month</summary><table class="modal-table"><thead><tr><th style="text-align:left">Tactic</th><th style="text-align:left">Year</th><th style="text-align:left">Month</th><th>Plan</th><th>Forecast</th><th>Commit</th></tr></thead><tbody>${tacticMonthRows}</tbody></table></details>` : ''}
   `;
 }
 
@@ -2602,6 +2626,28 @@ function entryRowHTML_campaign(c){
 
 function renderEntryTree(){
   const inPeriod = campaignsInPeriod(ENTRY_CAMPAIGNS, entryCampaignState);
+  const search = (document.getElementById('entrySearch').value||'').trim().toLowerCase();
+  renderEntryPeriodControls();
+  if (search){
+    // Flat, filtered results - same pattern as the Data tab's search: hierarchy
+    // doesn't help you find something you're already searching for by name.
+    const rows = inPeriod.filter(c=> c.campaign.toLowerCase().includes(search));
+    document.getElementById('entryCount').textContent = rows.length + ` matching campaigns · ${periodRangeLabel(entryCampaignState)}`;
+    document.getElementById('entryTbody').innerHTML = rows.map(entryRowHTML_campaign).join('')
+      || `<tr><td colspan="9" class="empty-note">No campaigns match that search in this period</td></tr>`;
+    document.querySelectorAll('#entryTbody .entry-edit-btn').forEach(btn=>{
+      btn.onclick = (e)=>{ e.stopPropagation(); openEntryCampaignModal(+btn.dataset.id); };
+    });
+    document.querySelectorAll('#entryTbody .entry-delete-btn').forEach(btn=>{
+      btn.onclick = async (e)=>{
+        e.stopPropagation();
+        if (!confirm('Delete this campaign? This cannot be undone.')) return;
+        await apiFetch(`/api/campaigns/${btn.dataset.id}`, {method:'DELETE'});
+        await refreshCampaignsFromBackend();
+      };
+    });
+    return;
+  }
   const tree = buildTeamTree(inPeriod);
   // A team starts expanded the first time it's seen, like the Data tab - but
   // only once, so a user's manual collapse survives later re-renders/refreshes.
@@ -2611,7 +2657,6 @@ function renderEntryTree(){
       entryTreeState.expandedTeams.add(team);
     }
   });
-  renderEntryPeriodControls();
   document.getElementById('entryCount').textContent = inPeriod.length + ` campaigns · ${periodRangeLabel(entryCampaignState)}`;
   let html = '';
   Object.entries(tree).forEach(([team, subTeams])=>{
@@ -3732,6 +3777,7 @@ document.getElementById('entryPeriodBtn').addEventListener('click', e=>{
   if (opening) renderEntryPeriodPanel();
 });
 document.getElementById('dataSearch').addEventListener('input', renderDataTab);
+document.getElementById('entrySearch').addEventListener('input', renderEntryTree);
 document.getElementById('dataYearSelect').addEventListener('change', e=>{
   dataTabState.year = +e.target.value;
   renderDataTab();
