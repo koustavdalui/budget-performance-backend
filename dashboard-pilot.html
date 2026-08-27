@@ -3621,6 +3621,20 @@ function renderImportReview(){
   if (btn) btn.onclick = confirmImport;
 }
 
+// apiFetch() only rejects on a genuine network error - a 400/403/500 response
+// resolves normally, so every call site that cares whether the request
+// actually succeeded has to check res.ok itself. This pulls FastAPI's
+// {detail: "..."} out of an error response when present, falling back to the
+// bare status code.
+async function describeApiError(res){
+  try{
+    const data = await res.json();
+    return data.detail || `HTTP ${res.status}`;
+  } catch(e){
+    return `HTTP ${res.status}`;
+  }
+}
+
 async function confirmImport(){
   const valid = importParsedGroups.filter(g=>g.errors.length===0);
   // Collects the distinct "NEW ..." warning text (minus the L#: prefix) across
@@ -3629,31 +3643,47 @@ async function confirmImport(){
   // the time this shows, nothing is blocked on it.
   const newValueSet = new Set();
   valid.forEach(g=> (g.warnings||[]).forEach(w=> newValueSet.add(w.replace(/^L\d+:\s*/,''))));
+  const btn = document.getElementById('importConfirmBtn');
+  if (btn) btn.disabled = true;
   let created=0, updated=0, deleted=0, notFound=0;
-  for (const g of valid){
+  const failures = [];
+  for (let i=0; i<valid.length; i++){
+    const g = valid[i];
+    if (btn) btn.textContent = `Importing ${i+1} of ${valid.length}...`;
     const cRow = g.campaignRow;
     const existing = ENTRY_CAMPAIGNS.find(c=> c.campaign.toLowerCase()===cRow.Campaign.toLowerCase() && c.team===cRow.Team);
-    if (g.action==='delete'){
-      if (existing){ await apiFetch(`/api/campaigns/${existing.id}`, {method:'DELETE'}); deleted++; }
-      else notFound++;
-      continue;
-    }
-    const payload = importGroupToPayload(g, existing);
-    if (existing){
-      await apiFetch(`/api/campaigns/${existing.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      updated++;
-    } else {
-      await apiFetch(`/api/campaigns`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      created++;
+    try{
+      if (g.action==='delete'){
+        if (existing){
+          const res = await apiFetch(`/api/campaigns/${existing.id}`, {method:'DELETE'});
+          if (!res.ok) throw new Error(await describeApiError(res));
+          deleted++;
+        } else notFound++;
+        continue;
+      }
+      const payload = importGroupToPayload(g, existing);
+      const res = existing
+        ? await apiFetch(`/api/campaigns/${existing.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+        : await apiFetch(`/api/campaigns`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      if (!res.ok) throw new Error(await describeApiError(res));
+      if (existing) updated++; else created++;
+    } catch(err){
+      // One campaign failing (a bad payload, a transient network/Render
+      // hiccup) must not silently abort the rest of a 100-row import - keep
+      // going and report every failure at the end instead.
+      failures.push(`${cRow.Campaign}: ${err.message||err}`);
     }
   }
   await refreshCampaignsFromBackend();
   document.getElementById('importOverlay').classList.remove('open');
   importParsedGroups = null;
+  const failNote = failures.length
+    ? `\n\n${failures.length} row(s) FAILED to import:\n- ${failures.slice(0,10).join('\n- ')}${failures.length>10?`\n...and ${failures.length-10} more`:''}`
+    : '';
   const newValuesNote = newValueSet.size
     ? `\n\nNew values imported as-is (not yet in the taxonomy list):\n- ${[...newValueSet].join('\n- ')}`
     : '';
-  alert(`Import complete: ${created} created, ${updated} updated, ${deleted} deleted${notFound?`, ${notFound} not found (skipped)`:''}.${newValuesNote}`);
+  alert(`Import complete: ${created} created, ${updated} updated, ${deleted} deleted${notFound?`, ${notFound} not found (skipped)`:''}.${failNote}${newValuesNote}`);
 }
 
 document.getElementById('expandTeamsBtn').onclick = openAllTeamsModal;
