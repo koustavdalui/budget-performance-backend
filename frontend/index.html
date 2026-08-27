@@ -3055,6 +3055,23 @@ function openEntryCampaignModal(campaignId){
   wireCampaignForm(campaignId);
 }
 
+// Shared by the manual Add/Edit form and bulk import: a campaign name match
+// is case-insensitive (marketing users retype names with different casing
+// and mean the same campaign), a Campaign ID match is exact (real Salesforce
+// 18-char IDs are case-sensitive by design). excludeId lets an edit-in-place
+// match itself without tripping its own check.
+function findCampaignConflicts(name, campaignId, excludeId){
+  const nameLower = (name||'').trim().toLowerCase();
+  const idTrim = (campaignId||'').trim();
+  let nameConflict = null, idConflict = null;
+  ENTRY_CAMPAIGNS.forEach(c=>{
+    if (excludeId && c.id===excludeId) return;
+    if (!nameConflict && nameLower && c.campaign.trim().toLowerCase()===nameLower) nameConflict = c;
+    if (!idConflict && idTrim && c.campaignId && c.campaignId.trim()===idTrim) idConflict = c;
+  });
+  return {nameConflict, idConflict};
+}
+
 function collectFormData(){
   syncLinesFromDOM('asset');
   syncLinesFromDOM('tactic');
@@ -3135,6 +3152,15 @@ function campaignPreviewHTML(draft){
 function previewCampaignFromForm(existingId){
   const draft = collectFormData();
   if (!draft.campaign){ alert('Campaign name is required.'); return; }
+  const {nameConflict, idConflict} = findCampaignConflicts(draft.campaign, draft.campaignId, existingId);
+  if (nameConflict){
+    alert(`Cannot save: a campaign named "${nameConflict.campaign}" already exists (Team: ${nameConflict.team}).\n\nUse a different name, or open that campaign to edit it instead.`);
+    return;
+  }
+  if (idConflict){
+    alert(`Cannot save: Campaign ID "${draft.campaignId}" is already used by "${idConflict.campaign}".\n\nCampaign IDs must be unique - double-check for a typo or copy-paste from the wrong row.`);
+    return;
+  }
   entryState.draft = draft;
   document.getElementById('modalContent').innerHTML = campaignPreviewHTML(draft);
   document.getElementById('ef-editBtn').onclick = ()=>{
@@ -3517,6 +3543,15 @@ function validateImportGroups(rows){
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
     if (cRow.Team && entryState.teams.length && !entryState.teams.includes(cRow.Team)) errors.push(`Team must be one of: ${entryState.teams.join(', ')}`);
     if (cRow.ConvRate && isNaN(parseImportNumber(cRow.ConvRate))) errors.push('ConvRate is not a number');
+    // A name+team match is treated as "update that campaign" everywhere else
+    // in the importer, so it's excluded here - only a name or ID collision
+    // with a DIFFERENT campaign is a real conflict.
+    if (action !== 'delete'){
+      const {nameConflict, idConflict} = findCampaignConflicts(cRow.Campaign, cRow.CampaignId, null);
+      const isSelfMatch = c => c.campaign.trim().toLowerCase()===(cRow.Campaign||'').trim().toLowerCase() && c.team===cRow.Team;
+      if (nameConflict && !isSelfMatch(nameConflict)) errors.push(`Campaign "${cRow.Campaign}" already exists under team "${nameConflict.team}" - fix Team if this is that same campaign, or rename this one if it's genuinely different`);
+      if (idConflict && !isSelfMatch(idConflict)) errors.push(`Campaign ID "${cRow.CampaignId}" is already used by campaign "${idConflict.campaign}"`);
+    }
     // CampaignType/SubCampaignType/LineName not matching the current taxonomy is
     // a warning, not a blocking error - same spirit as the manual entry form's
     // "+ Add new..." option on these same fields. The row still imports as
