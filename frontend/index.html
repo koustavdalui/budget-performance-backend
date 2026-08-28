@@ -142,7 +142,7 @@ tr.clickable{cursor:pointer;}
 .modal-back{background:none;border:none;color:var(--series-1);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;padding:0;margin-bottom:10px;}
 .modal-title{font-size:18px;font-weight:650;margin:0 0 8px;padding-right:24px;}
 .modal-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
-.modal-meta{font-size:13px;color:var(--text-secondary);margin-bottom:4px;}
+.modal-meta{font-size:13px;color:var(--text-secondary);margin-bottom:4px;overflow-wrap:break-word;word-break:break-word;}
 .modal-meta b{color:var(--text-primary);font-weight:600;}
 .modal-section-title{font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.02em;color:var(--text-muted);margin:18px 0 8px;}
 .modal-details{margin-bottom:4px;}
@@ -563,6 +563,14 @@ function normalizeCampaignsPayload(raw){
 let ALL_CAMPAIGNS = normalizeCampaignsPayload(RAW);
 let ENTRY_CAMPAIGNS = []; // flat list WITH ids, from GET /api/campaigns - used only by the Data Entry tab
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Generous bounds around any realistic campaign/budget planning horizon -
+// wide enough to never block real use, narrow enough to catch a fat-fingered
+// year (1899, 9999) before it reaches a chart's Year selector or axis.
+const MIN_SANE_YEAR = 2015, MAX_SANE_YEAR = 2035;
+function isSaneYear(y){
+  const n = parseInt(y, 10);
+  return !isNaN(n) && n>=MIN_SANE_YEAR && n<=MAX_SANE_YEAR;
+}
 const MONTHS_FULL = {Jan:'January',Feb:'February',Mar:'March',Apr:'April',May:'May',Jun:'June',Jul:'July',Aug:'August',Sep:'September',Oct:'October',Nov:'November',Dec:'December'};
 const QUARTERS = [
   {key:'Q1', from:0, to:2}, {key:'Q2', from:3, to:5}, {key:'Q3', from:6, to:8}, {key:'Q4', from:9, to:11},
@@ -2451,6 +2459,7 @@ function parseBudgetImportRows(rows){
     if (!team) errors.push('Missing Team');
     if (!yearRaw) errors.push('Missing Year');
     else if (!/^\d{4}$/.test(yearRaw)) errors.push('Year must be a 4-digit year');
+    else if (!isSaneYear(yearRaw)) errors.push(`Year ${yearRaw} doesn't look like a real year (expected ${MIN_SANE_YEAR}-${MAX_SANE_YEAR})`);
     if (actionRaw && !['create','update','delete'].includes(action)) errors.push('Action must be Create, Update, or Delete (or blank)');
     const year = /^\d{4}$/.test(yearRaw) ? parseInt(yearRaw, 10) : null;
     const payloads = [];
@@ -2496,7 +2505,10 @@ function parseBudgetImportRows(rows){
     }
 
     if (team && entryState.teams.length && !entryState.teams.includes(team) && action!=='delete'){
-      warnings.push(`Will create new team "${team}"`);
+      const suggestion = closestMatch(team, entryState.teams, 3);
+      warnings.push(suggestion
+        ? `Will create new team "${team}" - did you mean the existing "${suggestion}"?`
+        : `Will create new team "${team}"`);
     }
     return {line, team, year, action, quarterAmounts, payloads, errors, warnings};
   }).filter(r=> r.team || r.year || r.payloads.length || r.errors.length);
@@ -2538,7 +2550,7 @@ function openBudgetImportModal(){
   document.getElementById('budgetImportTemplateBtn2').onclick = downloadBudgetTemplate;
   document.getElementById('budgetImportValidateBtn').onclick = ()=>{
     const text = document.getElementById('budgetImportTextarea').value.trim();
-    if (!text) return;
+    if (!text){ alert('Paste some rows or upload a file first.'); return; }
     budgetImportParsed = parseBudgetImportRows(parseCSVText(text));
     renderBudgetImportReview();
   };
@@ -2867,6 +2879,7 @@ function renderLinesEditor(kind){
       const year = block.querySelector('.add-month-year').value.trim();
       const month = block.querySelector('.add-month-select').value;
       if (!year) return;
+      if (!isSaneYear(year)){ alert(`"${year}" doesn't look like a real year (expected ${MIN_SANE_YEAR}-${MAX_SANE_YEAR}).`); return; }
       const line = entryState[cfg.stateKey][idx];
       line.months = line.months || {};
       line.months[year] = line.months[year] || {};
@@ -3195,6 +3208,14 @@ function previewCampaignFromForm(existingId){
     alert(`Cannot save: Campaign ID "${draft.campaignId}" is already used by "${idConflict.campaign}".\n\nCampaign IDs must be unique - double-check for a typo or copy-paste from the wrong row.`);
     return;
   }
+  if (draft.startDate && draft.endDate && draft.endDate < draft.startDate){
+    alert(`End date (${draft.endDate}) is before start date (${draft.startDate}). Fix the dates before saving.`);
+    return;
+  }
+  if (draft.convRate!=null && draft.convRate<0){
+    alert(`Conv rate (${draft.convRate}) can't be negative.`);
+    return;
+  }
   entryState.draft = draft;
   document.getElementById('modalContent').innerHTML = campaignPreviewHTML(draft);
   document.getElementById('ef-editBtn').onclick = ()=>{
@@ -3209,6 +3230,14 @@ function previewCampaignFromForm(existingId){
 }
 
 async function saveCampaignFromForm(existingId, data){
+  // Guards a fast double-click: the button disables the instant the first
+  // click fires, before the request even goes out, so a second click before
+  // the response lands is a no-op instead of a second POST.
+  const btn = document.getElementById('ef-saveBtn2');
+  if (btn){
+    if (btn.disabled) return;
+    btn.disabled = true;
+  }
   try{
     const path = existingId ? `/api/campaigns/${existingId}` : `/api/campaigns`;
     const method = existingId ? 'PUT' : 'POST';
@@ -3218,6 +3247,7 @@ async function saveCampaignFromForm(existingId, data){
     await refreshCampaignsFromBackend();
   } catch(e){
     alert('Could not save campaign: '+e.message);
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -3312,6 +3342,31 @@ function buildCaseInsensitiveIndex(values){
   const m = new Map();
   values.forEach(v=> m.set(v.toLowerCase(), v));
   return m;
+}
+
+// Case-insensitive matches are already resolved before this runs (see
+// importCanon) - this only fires for a genuinely different string, to catch
+// a typo/extra-space team name before it silently creates a near-duplicate
+// team, without blocking a real new team (which has no close existing match).
+function levenshtein(a, b){
+  const m = a.length, n = b.length;
+  const d = Array.from({length: m+1}, (_, i)=> [i, ...Array(n).fill(0)]);
+  for (let j=0; j<=n; j++) d[0][j] = j;
+  for (let i=1; i<=m; i++){
+    for (let j=1; j<=n; j++){
+      d[i][j] = a[i-1]===b[j-1] ? d[i-1][j-1] : 1 + Math.min(d[i-1][j], d[i][j-1], d[i-1][j-1]);
+    }
+  }
+  return d[m][n];
+}
+function closestMatch(value, candidates, maxDistance){
+  const v = value.toLowerCase();
+  let best = null, bestDist = Infinity;
+  candidates.forEach(c=>{
+    const dist = levenshtein(v, c.toLowerCase());
+    if (dist < bestDist){ bestDist = dist; best = c; }
+  });
+  return bestDist<=maxDistance ? best : null;
 }
 const IMPORT_TYPE_CANON = buildCaseInsensitiveIndex(['Campaign','Asset','Tactic']);
 const IMPORT_CAMPAIGN_TYPE_CANON = buildCaseInsensitiveIndex(Object.keys(IMPORT_CAMPAIGN_TYPE_SUBTYPES));
@@ -3503,8 +3558,8 @@ function groupImportRows(rows){
       return;
     }
     let g = byName.get(name);
-    if (!g){ g = {campaign: name, campaignRow: null, lineRows: [], firstIndex: i+2}; byName.set(name, g); groups.push(g); }
-    if (type==='Campaign'){ g.campaignRow = row; return; }
+    if (!g){ g = {campaign: name, campaignRow: null, campaignRowLines: [], lineRows: [], firstIndex: i+2}; byName.set(name, g); groups.push(g); }
+    if (type==='Campaign'){ g.campaignRow = row; g.campaignRowLines.push(i+2); return; }
     // A placeholder Asset/Tactic row - no LineName and no $ anywhere - carries
     // no actual data (someone left an unused template row in place). Drop it
     // silently rather than forcing a LineName onto a row that was never used.
@@ -3586,11 +3641,17 @@ function validateImportGroups(rows){
     }
     const cRow = g.campaignRow;
     if (cRow.Team) cRow.Team = importCanon(teamCanon, cRow.Team);
+    // Two Type=Campaign rows sharing a name silently overwrite each other
+    // (only the last one's metadata survives) with no signal that the first
+    // was ever dropped - flagged here instead of letting it disappear.
+    if (g.campaignRowLines.length > 1) errors.push(`Lines ${g.campaignRowLines.join(', ')}: multiple Campaign-type rows share the name "${g.campaign}" - only one can be kept, remove the extras`);
     const action = (cRow.Action||'').trim().toLowerCase() || 'update';
     if (cRow.Action && !['create','update','delete'].includes(action)) errors.push('Action must be Create, Update, or Delete (or blank)');
     if (!cRow.Team) errors.push('Missing Team on the Campaign row');
     if (cRow.Team && entryState.teams.length && !entryState.teams.includes(cRow.Team)) errors.push(`Team must be one of: ${entryState.teams.join(', ')}`);
     if (cRow.ConvRate && isNaN(parseImportNumber(cRow.ConvRate))) errors.push('ConvRate is not a number');
+    else if (cRow.ConvRate && parseImportNumber(cRow.ConvRate)<0) errors.push(`ConvRate (${cRow.ConvRate}) can't be negative`);
+    if (cRow.StartDate && cRow.EndDate && cRow.EndDate < cRow.StartDate) errors.push(`End date (${cRow.EndDate}) is before start date (${cRow.StartDate})`);
     // A name+team match is treated as "update that campaign" everywhere else
     // in the importer, so it's excluded here - only a name or ID collision
     // with a DIFFERENT campaign is a real conflict.
@@ -3627,6 +3688,7 @@ function validateImportGroups(rows){
       if (type==='Asset' && row.LineName && !IMPORT_ASSET_LINE_NAMES.includes(row.LineName)) warnings.push(`L${index}: New Asset "${row.LineName}" (not in the current list)`);
       if (type==='Tactic' && row.LineName && !IMPORT_TACTIC_LINE_NAMES.includes(row.LineName)) warnings.push(`L${index}: New Tactic "${row.LineName}" (not in the current list)`);
       if (row.Year && !/^\d{4}$/.test(row.Year.trim())) errors.push(`L${index}: Year must be a 4-digit year`);
+      else if (row.Year && !isSaneYear(row.Year.trim())) errors.push(`L${index}: Year ${row.Year.trim()} doesn't look like a real year (expected ${MIN_SANE_YEAR}-${MAX_SANE_YEAR})`);
       MONTHS.forEach(m=> CSV_METRICS.forEach(met=>{
         const key = `${m} ${CSV_METRIC_LABELS[met]}`;
         validateImportAmount(row[key], `L${index}: "${key}"`, errors);
@@ -3689,8 +3751,10 @@ function openImportModal(){
       Download the Excel template and open it in <b>Excel on your computer</b> — dropdown arrows are on
       Action, Type, CampaignType, SubCampaignType, and LineName. Google Sheets strips those Excel
       dropdowns when you convert the file; in Sheets use Data → Data validation and point each column
-      at the matching range on the <b>DropdownLists</b> sheet (or fill from that sheet). Import still
-      rejects a subtype that does not match CampaignType, or a LineName that does not match Type.
+      at the matching range on the <b>DropdownLists</b> sheet (or fill from that sheet). A
+      SubCampaignType that doesn't fit CampaignType, or a LineName not in the current Asset/Tactic
+      list, imports anyway and is flagged as a warning to review afterward — not rejected, same as
+      typing a new one manually.
       One <b>Campaign</b>-type row per campaign (metadata), followed by any number of
       <b>Asset</b>/<b>Tactic</b>-type rows carrying that line's monthly Plan/Forecast/Commit/Actual $
       &mdash; one row per year a line has data in. Rows link by <b>Campaign</b> name, not position.
@@ -3725,7 +3789,7 @@ function openImportModal(){
   document.getElementById('importTemplateBtn2').onclick = downloadCSVTemplate;
   document.getElementById('importValidateBtn').onclick = ()=>{
     const text = document.getElementById('importTextarea').value.trim();
-    if (!text) return;
+    if (!text){ alert('Paste some rows or upload a file first.'); return; }
     importParsedGroups = validateImportGroups(parseCSVText(text));
     renderImportReview();
   };
