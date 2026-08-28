@@ -614,9 +614,21 @@ function campaignHasPeriodSpend(c, year, months){
     return !!(v && (v.plan!=null || v.forecast!=null || v.commit!=null || v.actual!=null));
   });
 }
+// A campaign entered as metadata-only (no Asset/Tactic line ever given a $
+// yet - a normal "shell now, budget later" step) has no month data in ANY
+// year, so it would fail campaignHasPeriodSpend no matter which period is
+// selected - permanently invisible in both Data Entry and the Data tab, with
+// no way to find or edit it again, even though the Dashboard's own campaign
+// count and search still see it fine. Such a campaign is exempt from period
+// filtering entirely rather than hidden by it.
+function campaignHasAnySpend(c){
+  return Object.values(c.months||{}).some(ym=>
+    Object.values(ym||{}).some(v=> v && (v.plan!=null || v.forecast!=null || v.commit!=null || v.actual!=null))
+  );
+}
 function campaignsInPeriod(list, state){
   const months = selectedMonthsFromPeriod(state);
-  return (list||[]).filter(c=> campaignHasPeriodSpend(c, state.year, months));
+  return (list||[]).filter(c=> !campaignHasAnySpend(c) || campaignHasPeriodSpend(c, state.year, months));
 }
 function fillPeriodPanel(panel, btn, state, onChange){
   const opts = periodOptions(state.periodMode);
@@ -2447,7 +2459,11 @@ function parseBudgetImportRows(rows){
     const addQuarter = (q, rawAmt, required)=>{
       const amt = (rawAmt==null) ? '' : String(rawAmt).trim();
       if (amt==='' && !required && action!=='delete') return;
-      if (amt!=='' && isNaN(parseImportNumber(amt))){ errors.push(`${q} is not a number`); return; }
+      if (amt!==''){
+        const beforeCount = errors.length;
+        validateImportAmount(amt, q, errors);
+        if (errors.length > beforeCount) return;
+      }
       const amount = amt==='' ? null : parseImportNumber(amt);
       quarterAmounts[q] = amount;
       payloads.push({team, year, quarter:q, amount, action: action==='delete' ? 'delete' : 'update'});
@@ -2529,19 +2545,33 @@ function openBudgetImportModal(){
   document.getElementById('importOverlay').classList.add('open');
 }
 
+// The value(s) an import row would overwrite, if any - looked up from the
+// budgets already loaded into entryState. Shown so "this resolves to a team
+// that already has a real budget" is visible before Import is clicked, not
+// discovered after (a case-variant Team typo silently matching a real team
+// is exactly the scenario this exists to surface).
+function existingBudgetAmount(team, year, quarter){
+  const b = (entryState.budgets||[]).find(x=>x.team===team && x.year===year && x.quarter===quarter);
+  return b ? b.amount : null;
+}
 function renderBudgetImportReview(){
   const validCount = budgetImportParsed.filter(r=>r.errors.length===0).length;
   document.getElementById('budgetImportReviewContainer').innerHTML = `
     <div style="font-weight:650;font-size:13px;margin:10px 0 8px;">${validCount} of ${budgetImportParsed.length} row${budgetImportParsed.length!==1?'s':''} valid</div>
     <div class="import-review">
       ${budgetImportParsed.map(r=>{
-        const qs = BUDGET_QUARTERS.filter(q=>r.quarterAmounts[q]!==undefined).map(q=>`${q} ${r.action==='delete'?'(clear)':fmtMoney(r.quarterAmounts[q], false)}`).join(' · ');
+        const qs = BUDGET_QUARTERS.filter(q=>r.quarterAmounts[q]!==undefined).map(q=>{
+          const existing = r.team && r.year ? existingBudgetAmount(r.team, r.year, q) : null;
+          if (r.action==='delete') return `${q} (clear${existing!=null?` - was ${fmtMoney(existing,false)}`:''})`;
+          const next = fmtMoney(r.quarterAmounts[q], false);
+          return (existing!=null && existing!==r.quarterAmounts[q]) ? `${q} ${fmtMoney(existing,false)} &rarr; ${next}` : `${q} ${next}`;
+        }).join(' · ');
         const extra = r.errors.length ? r.errors.join('; ') : (r.warnings||[]).join('; ');
         return `
         <div class="import-review-row ${r.errors.length?'invalid':'valid'}">
           <span class="import-action-badge">${r.action}</span>
           <span>L${r.line}: ${escapeHtml(r.team||'?')} ${r.year||''}
-            ${qs?' &mdash; '+escapeHtml(qs):''}
+            ${qs?' &mdash; '+qs:''}
             ${extra?' &mdash; '+escapeHtml(extra):''}</span>
         </div>`;
       }).join('')}
@@ -3309,6 +3339,20 @@ function parseImportNumber(v){
   return cleaned==='' ? NaN : parseFloat(cleaned);
 }
 
+// Spend can't be negative, and real figures here top out in the single-digit
+// millions per quarter for a whole team - a $100M+ cell is essentially always
+// a stray digit or unit mixup, not real spend. Caught here so it can't reach
+// the Dashboard, where one such value has been shown to blow out the KPI
+// totals and rescale every chart's axis into unreadability for every viewer.
+const MAX_SANE_IMPORT_AMOUNT = 100000000;
+function validateImportAmount(v, label, errors){
+  if (!v) return;
+  const n = parseImportNumber(v);
+  if (isNaN(n)){ errors.push(`${label} is not a number`); return; }
+  if (n < 0) errors.push(`${label} is negative ($${n.toLocaleString()}) - spend amounts can't be negative`);
+  else if (n > MAX_SANE_IMPORT_AMOUNT) errors.push(`${label} is implausibly large ($${n.toLocaleString()}) - check for a stray digit`);
+}
+
 function normalizeImportRow(obj){
   const out = {};
   Object.keys(obj||{}).forEach(k=>{
@@ -3556,11 +3600,16 @@ function validateImportGroups(rows){
       if (nameConflict && !isSelfMatch(nameConflict)) errors.push(`Campaign "${cRow.Campaign}" already exists under team "${nameConflict.team}" - fix Team if this is that same campaign, or rename this one if it's genuinely different`);
       if (idConflict && !isSelfMatch(idConflict)) errors.push(`Campaign ID "${cRow.CampaignId}" is already used by campaign "${idConflict.campaign}"`);
     }
-    // CampaignType/SubCampaignType/LineName not matching the current taxonomy is
-    // a warning, not a blocking error - same spirit as the manual entry form's
-    // "+ Add new..." option on these same fields. The row still imports as
-    // typed; a human reviews the flagged "new" values afterward and decides
-    // whether to add them to the taxonomy for next time.
+    // CampaignType/SubCampaignType/SubTeam/LineName not matching the current
+    // taxonomy is a warning, not a blocking error - same spirit as the manual
+    // entry form's "+ Add new..." option on these same fields. The row still
+    // imports as typed; a human reviews the flagged "new" values afterward
+    // and decides whether to add them to the taxonomy for next time.
+    const subTeam = (cRow.SubTeam||'').trim();
+    if (subTeam && cRow.Team){
+      const knownSubTeams = buildCaseInsensitiveIndex(subTeamsForTeam(cRow.Team));
+      if (!knownSubTeams.has(subTeam.toLowerCase())) warnings.push(`New Sub Team "${subTeam}" for "${cRow.Team}" (not registered before)`);
+    }
     const ctype = (cRow.CampaignType||'').trim();
     const stype = (cRow.SubCampaignType||'').trim();
     if (ctype && !IMPORT_CAMPAIGN_TYPE_SUBTYPES[ctype]) warnings.push(`New CampaignType "${ctype}" (not in the current list)`);
@@ -3580,8 +3629,7 @@ function validateImportGroups(rows){
       if (row.Year && !/^\d{4}$/.test(row.Year.trim())) errors.push(`L${index}: Year must be a 4-digit year`);
       MONTHS.forEach(m=> CSV_METRICS.forEach(met=>{
         const key = `${m} ${CSV_METRIC_LABELS[met]}`;
-        const v = row[key];
-        if (v && isNaN(parseImportNumber(v))) errors.push(`L${index}: "${key}" is not a number`);
+        validateImportAmount(row[key], `L${index}: "${key}"`, errors);
       }));
     });
     return {...g, action, errors, warnings};
